@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
     "email",
     "profile",
   ]);
+  // 讓 Google 帳號選擇器只顯示本網域帳號（UX 過濾）。真正的安全閘門仍是
+  // callback 端的 email 網域驗證——hd 只是提示，不可當作唯一防線。
+  authUrl.searchParams.set("hd", authConfig.allowedEmailDomain);
 
   const response = NextResponse.redirect(authUrl);
   response.cookies.set(OAUTH_COOKIES.state, state, tempCookieOptions);
