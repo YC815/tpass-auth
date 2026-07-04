@@ -17,14 +17,13 @@ const tempCookieOptions = {
 };
 
 export async function GET(request: NextRequest) {
-  // 登入成功後要導回哪裡；未指定則回本服務。
-  const redirectUri =
-    request.nextUrl.searchParams.get("redirect_uri") ?? authConfig.baseUrl;
-
-  // 白名單驗證，防 Open Redirect。
-  if (!isAllowedRedirect(redirectUri)) {
+  // 登入成功後要導回哪裡。外部傳入的值要過白名單（防 Open Redirect）；
+  // 沒帶（被單獨訪問）就用信任的預設值＝門戶大廳，不必也不該被 suffix 白名單擋。
+  const requested = request.nextUrl.searchParams.get("redirect_uri");
+  if (requested && !isAllowedRedirect(requested)) {
     return new NextResponse("Invalid redirect_uri", { status: 400 });
   }
+  const redirectUri = requested ?? authConfig.portalUrl;
 
   const state = generateState();
   const codeVerifier = generateCodeVerifier();

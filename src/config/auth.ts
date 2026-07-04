@@ -10,6 +10,7 @@ const REQUIRED = [
   "AUTH_COOKIE_NAME",
   "AUTH_ALLOWED_HOST_SUFFIX",
   "AUTH_ALLOWED_EMAIL_DOMAIN",
+  "PORTAL_URL",
   "JWT_PRIVATE_KEY",
   "JWT_PUBLIC_KEY",
   "JWT_ISSUER",
@@ -48,6 +49,9 @@ export const authConfig = {
   allowedHostSuffix: process.env.AUTH_ALLOWED_HOST_SUFFIX!,
   // 只放行此 email 網域（不含 @）。
   allowedEmailDomain: process.env.AUTH_ALLOWED_EMAIL_DOMAIN!.toLowerCase(),
+  // 門戶大廳網址。auth 本身不是使用者的目的地——被單獨訪問（沒帶 redirect_uri）時，
+  // 登入完就把人送回門戶，而不是停在 auth 自己頁面。env 驅動，絕不寫死網域。
+  portalUrl: process.env.PORTAL_URL!,
   jwt: {
     privateKeyPem: process.env.JWT_PRIVATE_KEY!,
     publicKeyPem: process.env.JWT_PUBLIC_KEY!,

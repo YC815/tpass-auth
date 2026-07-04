@@ -29,11 +29,11 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Invalid OAuth state", { status: 400 });
   }
 
-  // redirect_uri 在 login 時已驗過，這裡再驗一次（cookie 可能被竄改），不合法則回本服務。
+  // redirect_uri 在 login 時已驗過，這裡再驗一次（cookie 可能被竄改），不合法則回門戶大廳。
   const redirectTarget =
     storedRedirect && isAllowedRedirect(storedRedirect)
       ? storedRedirect
-      : authConfig.baseUrl;
+      : authConfig.portalUrl;
 
   // 用 codeVerifier 換 token。
   let accessToken: string;

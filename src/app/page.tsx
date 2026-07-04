@@ -1,5 +1,8 @@
 // T-Pass 登入頁。這不是門戶，只是發證服務的登入入口。
+// auth 不是使用者的目的地：已持有通行證的人被單獨導到這裡，直接送回門戶大廳。
+import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+import { authConfig } from "@/config/auth";
 
 export default async function Home({
   searchParams,
@@ -7,6 +10,7 @@ export default async function Home({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
+  if (session) redirect(authConfig.portalUrl);
   const { error } = await searchParams;
 
   return (
@@ -19,46 +23,24 @@ export default async function Home({
           <p className="mt-2 text-sm text-zinc-400">校園核心服務通行證</p>
         </div>
 
-        {session ? (
-          <div className="space-y-6">
-            <div className="rounded-lg bg-white/5 px-4 py-3 text-center text-sm text-zinc-200">
-              已登入：{session.name}
-              <span className="block text-xs text-zinc-500">
-                {session.email}
-              </span>
-            </div>
-            <form action="/api/auth/logout" method="post">
-              <button
-                type="submit"
-                className="w-full rounded-lg border border-white/15 px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/10"
-              >
-                登出
-              </button>
-            </form>
-            <p className="text-center text-xs text-zinc-500">
-              你已持有通行證，可直接前往各校園服務
+        <div className="space-y-4">
+          {error === "domain" && (
+            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-center text-sm text-red-300">
+              此帳號不在授權範圍，請使用學校帳號登入。
             </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {error === "domain" && (
-              <p className="rounded-lg bg-red-500/10 px-4 py-3 text-center text-sm text-red-300">
-                此帳號不在授權範圍，請使用學校帳號登入。
-              </p>
-            )}
-            {error === "oauth" && (
-              <p className="rounded-lg bg-red-500/10 px-4 py-3 text-center text-sm text-red-300">
-                登入過程發生問題，請再試一次。
-              </p>
-            )}
-            <a
-              href="/api/auth/login"
-              className="block w-full rounded-lg bg-indigo-500 px-4 py-3 text-center text-sm font-medium text-white transition-colors hover:bg-indigo-400"
-            >
-              使用學校 Google 帳號登入
-            </a>
-          </div>
-        )}
+          )}
+          {error === "oauth" && (
+            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-center text-sm text-red-300">
+              登入過程發生問題，請再試一次。
+            </p>
+          )}
+          <a
+            href="/api/auth/login"
+            className="block w-full rounded-lg bg-indigo-500 px-4 py-3 text-center text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+          >
+            使用學校 Google 帳號登入
+          </a>
+        </div>
       </div>
     </main>
   );
