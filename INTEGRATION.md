@@ -234,8 +234,8 @@ location.href =
 
 ## 8. 參考實作（可直接抄）
 
-> 標準參考實作在 **`portal` 服務**：`../t-pass/src/lib/tpass-auth.ts`（驗章核心）、
-> `../t-pass/src/config/portal.ts`（設定）、`../t-pass/src/app/page.tsx`（在 Server Component 用）。
+> 標準參考實作在 **`portal` 服務**：`../tpass-portal/src/lib/tpass-auth.ts`（驗章核心）、
+> `../tpass-portal/src/config/portal.ts`（設定）、`../tpass-portal/src/app/page.tsx`（在 Server Component 用）。
 > 下面是各 stack 的對應寫法。
 
 ### 8.1 Node / TypeScript（用 `jose`，**正規寫法**）
