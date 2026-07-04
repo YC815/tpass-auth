@@ -64,7 +64,7 @@
 | **audience（`aud`）** | `tschool-sso` — 驗章時**必須檢查** |
 | **JWKS 公鑰來源** | `GET https://auth.lvh.me:3000/.well-known/jwks.json` |
 | **登入入口** | `GET https://auth.lvh.me:3000/api/auth/login?redirect_uri=<你的完整網址>` |
-| **登出入口** | `POST https://auth.lvh.me:3000/api/auth/logout` |
+| **登出入口** | `POST https://auth.lvh.me:3000/api/auth/logout?redirect_uri=<你的完整網址>`（選填） |
 | **token 有效期** | 8 小時（`exp - iat`） |
 
 ---
@@ -217,8 +217,8 @@ location.href =
 
 ### 7.2 登出（整個生態系一起登出）
 
-`POST` 到登出入口，auth 會清掉那張頂層 cookie（用相同的 name/domain/path，否則刪不掉），
-然後 `303` 導回 auth 首頁。因為 cookie 是 `Domain=.lvh.me`，清掉後**整個生態系都登出**。
+`POST` 到登出入口，auth 會清掉那張頂層 cookie（用相同的 name/domain/path，否則刪不掉）。
+因為 cookie 是 `Domain=.lvh.me`，清掉後**整個生態系都登出**。
 
 ```html
 <form method="post" action="https://auth.lvh.me:3000/api/auth/logout">
@@ -229,6 +229,20 @@ location.href =
 > 為什麼 `POST` + `<form>` 能帶到 cookie？因為 `foo.lvh.me` 與 `auth.lvh.me` 是**同站**
 > （同一個註冊網域 `lvh.me`），`SameSite=Lax` 的 cookie 在同站請求（含 POST 表單送出）都會被帶上。
 > 跨「不同註冊網域」才會被 Lax 擋。
+
+**`redirect_uri`（選填）**：不帶時維持上面的舊行為——`303` 導回 auth 首頁。帶了的話，規則與
+§7.1 登入的 `redirect_uri` 完全相同（必須是完整網址，hostname 落在 `*.lvh.me` 底下，否則
+`400 Invalid redirect_uri`），登出後會 `303` 導回你自己的服務，而不是 auth 首頁：
+
+```html
+<form method="post" action="https://auth.lvh.me:3000/api/auth/logout?redirect_uri=https://foo.lvh.me:3002">
+  <button type="submit">登出</button>
+</form>
+```
+
+導回你的服務時，網址會多帶一個 `?logout=1`。**這只是畫面提示，不是身分憑證**——你只能在自己
+已經用 §5 驗章確認「目前沒有有效 session」的前提下，拿它來決定要不要顯示「已登出」文案；
+絕對不要用它來判斷登入狀態或做任何權限判斷，登入狀態永遠只能來自 cookie + 本地驗章。
 
 ---
 
