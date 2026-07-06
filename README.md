@@ -1,36 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# T-Pass SSO 發證服務（tpass-auth）
 
-## Getting Started
+TSchool 生態系的中央登入服務：跑 Google OAuth 確認身分 → 對白名單服務簽發
+per-service EdDSA JWT（`aud=tpass:<id>`，契約 v2）→ 公開 JWKS 公鑰。
+**全生態唯一持有簽章私鑰的服務**；消費端只拿公鑰本地驗章，不回呼本服務。
 
-First, run the development server:
+| 項目 | 值 |
+| --- | --- |
+| 服務 id | `auth`（tpass-ops `services.json`） |
+| 本機網址 | `https://auth.lvh.me:3000` |
+| 正式網址 | `https://auth.tschoolsu.org` |
+| 資料庫 | 無 |
+| 對接合約 | **`INTEGRATION.md`（本 repo，權威）** |
+
+## 開發
+
+一律從上層 tpass-ops repo 啟動：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 上層目錄
+scripts/tpass dev auth      # 或 tpass dev（全部服務）
+scripts/tpass check auth    # push 前：lint + tsc --noEmit
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**禁止裸 `npm run dev`。** env 必填清單以 `src/config/auth.ts` 的 `REQUIRED` 為準
+（範本 `.env.example`）；EdDSA 金鑰用 `node scripts/gen-keys.mjs` 產（不落盤、不進 git）。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 結構速記
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/app/api/auth/login` — 啟動 Google OAuth（state + PKCE，arctic）
+- `src/app/api/auth/callback/google` — 換 token、驗 email 網域、簽 session
+- `src/app/api/auth/authorize` — **契約 v2 核心**：對白名單服務簽 per-service token（form_post 交付）
+- `src/app/api/auth/logout` — 清 v1/v2 session cookie
+- `src/app/.well-known/jwks.json` — 公鑰（kid 支援輪替）
+- `src/lib/session.ts` — 簽/驗章集中地；`src/config/auth.ts` — 全 env 驅動設定
 
-## Learn More
+## 安全紅線
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+私鑰只存在 `.env.local` 的 `JWT_PRIVATE_KEY`；`AUTH_SERVICE_IDS` 是服務白名單；
+`redirect_uri` 一律過 `isAllowedRedirect` 白名單。細節與威脅模型見
+`INTEGRATION.md` 與上層 `docs/SECURITY-REVIEW.md`。
