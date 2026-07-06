@@ -2,7 +2,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authConfig } from "@/config/auth";
 import { google, isAllowedRedirect, OAUTH_COOKIES } from "@/lib/oauth";
-import { resolveClaims, signSession, type GoogleProfile } from "@/lib/session";
+import {
+  resolveClaims,
+  signAuthSession,
+  signSession,
+  type GoogleProfile,
+} from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -66,18 +71,29 @@ export async function GET(request: NextRequest) {
     return fail("domain");
   }
 
-  // 簽發 T-Pass session JWT。
-  const token = await signSession(resolveClaims(profile));
-
+  const claims = resolveClaims(profile);
   const response = NextResponse.redirect(redirectTarget);
-  response.cookies.set(authConfig.cookie.name, token, {
+
+  // v2：auth 自己的登入態，host-only（不設 Domain）——只有 auth 網域收得到。
+  response.cookies.set(authConfig.sessionCookieName, await signAuthSession(claims), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: authConfig.jwt.ttlSeconds,
     secure: authConfig.cookie.secure,
-    domain: authConfig.cookie.domain,
   });
+
+  // v1（遷移期）：跨子網域共用 cookie，相容未升級消費端；全數升級後由 env 停發。
+  if (authConfig.issueLegacyCookie) {
+    response.cookies.set(authConfig.cookie.name, await signSession(claims), {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: authConfig.jwt.ttlSeconds,
+      secure: authConfig.cookie.secure,
+      domain: authConfig.cookie.domain,
+    });
+  }
 
   // 清掉暫存 cookie。
   response.cookies.delete(OAUTH_COOKIES.state);
