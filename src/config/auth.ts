@@ -10,6 +10,7 @@ const REQUIRED = [
   "AUTH_COOKIE_NAME",
   "AUTH_ALLOWED_HOST_SUFFIX",
   "AUTH_ALLOWED_EMAIL_DOMAIN",
+  "AUTH_SERVICE_IDS",
   "PORTAL_URL",
   "JWT_PRIVATE_KEY",
   "JWT_PUBLIC_KEY",
@@ -39,12 +40,21 @@ export const authConfig = {
   },
   baseUrl,
   cookie: {
+    // v1（遷移期）：跨子網域共用 cookie。所有消費端切到 v2 後停發（AUTH_ISSUE_LEGACY_COOKIE=0）。
     name: process.env.AUTH_COOKIE_NAME!,
     // dev 留空＝host-only（localhost 才跑得動）；非空才設 Domain（未來跨子網域）。
     domain: process.env.AUTH_COOKIE_DOMAIN || undefined,
     // 由 origin 是否為 https 推導 Secure：localhost(http) 不設，正式(https) 必設。
     secure: baseUrl.startsWith("https://"),
   },
+  // v2：auth 自己的登入態，host-only（不設 Domain）——只有 auth 網域收得到，
+  // 縮小外洩半徑：任何子網域被攻破都拿不到這顆 cookie。
+  sessionCookieName: "tpass_auth_session",
+  // v2：可申請 per-service token 的服務 id 白名單（逗號分隔，例 portal,form,msg,appeals）。
+  // 每個服務拿到的 token aud=tpass:<id>，只在該服務有效——單一服務被攻破不再等於全生態淪陷。
+  serviceIds: process.env.AUTH_SERVICE_IDS!.split(",").map((s) => s.trim()).filter(Boolean),
+  // 遷移旗標：預設同時簽發 v1 共用 cookie（相容未升級消費端）；全數升級後設 0 停發。
+  issueLegacyCookie: process.env.AUTH_ISSUE_LEGACY_COOKIE !== "0",
   // redirect_uri 白名單的根網域。比對時用 host === base || host.endsWith('.'+base)。
   allowedHostSuffix: process.env.AUTH_ALLOWED_HOST_SUFFIX!,
   // 只放行此 email 網域（不含 @）。

@@ -46,9 +46,16 @@ function getPublicKey(): Promise<CryptoKey> {
 // 公鑰也給 JWKS route 用。
 export { getPublicKey };
 
-// 用 EdDSA 私鑰簽發 session JWT。
-export async function signSession(
+// audience 命名慣例（契約 v2）：每個服務一個 aud=tpass:<serviceId>，token 只在該服務有效。
+export const serviceAudience = (serviceId: string) => `tpass:${serviceId}`;
+
+// auth 自己登入態的 audience（host-only cookie 裡那顆）。
+const AUTH_SELF_AUDIENCE = serviceAudience("auth");
+
+// 以指定 audience 簽 JWT（共用簽章邏輯；aud 決定這顆 token 在哪裡有效）。
+async function sign(
   claims: Omit<TPassClaims, "exp">,
+  audience: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const privateKey = await getPrivateKey();
@@ -61,23 +68,39 @@ export async function signSession(
     .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.kid })
     .setSubject(claims.sub)
     .setIssuer(authConfig.jwt.issuer)
-    .setAudience(authConfig.jwt.audience)
+    .setAudience(audience)
     .setIssuedAt(now)
     .setExpirationTime(now + authConfig.jwt.ttlSeconds)
     .sign(privateKey);
 }
 
+// v1（遷移期）：簽全生態共用 audience 的 session JWT。
+export const signSession = (claims: Omit<TPassClaims, "exp">) =>
+  sign(claims, authConfig.jwt.audience);
+
+// v2：簽 auth 自己的登入態（host-only cookie 用）。
+export const signAuthSession = (claims: Omit<TPassClaims, "exp">) =>
+  sign(claims, AUTH_SELF_AUDIENCE);
+
+// v2：簽 per-service token。aud=tpass:<id>，只在該服務有效——
+// 單一服務被攻破或子網域被接管，拿到的 token 在其他服務一律驗不過。
+export const signServiceToken = (
+  claims: Omit<TPassClaims, "exp">,
+  serviceId: string,
+) => sign(claims, serviceAudience(serviceId));
+
 // 用公鑰驗章。安全關鍵：必鎖 algorithms 防 alg confusion（公鑰被當對稱密鑰偽造 token）。
 // 失敗一律回 null，不把 error throw 給呼叫端。
 export async function verifySession(
   token: string,
+  audience: string = authConfig.jwt.audience,
 ): Promise<TPassClaims | null> {
   try {
     const publicKey = await getPublicKey();
     const { payload } = await jwtVerify(token, publicKey, {
       algorithms: ["EdDSA"],
       issuer: authConfig.jwt.issuer,
-      audience: authConfig.jwt.audience,
+      audience,
     });
     return {
       sub: payload.sub as string,
@@ -92,11 +115,18 @@ export async function verifySession(
   }
 }
 
-// 從 cookie 讀目前 session，回 claims 或 null。
+// 讀 auth 目前的登入態：先看 v2 host-only cookie，遷移期 fallback 到 v1 共用 cookie
+// （既有登入者只有 v1 cookie，不 fallback 會全體被登出）。
 export async function getSession(): Promise<TPassClaims | null> {
-  const token = (await cookies()).get(authConfig.cookie.name)?.value;
-  if (!token) return null;
-  return verifySession(token);
+  const jar = await cookies();
+  const own = jar.get(authConfig.sessionCookieName)?.value;
+  if (own) {
+    const claims = await verifySession(own, AUTH_SELF_AUDIENCE);
+    if (claims) return claims;
+  }
+  const legacy = jar.get(authConfig.cookie.name)?.value;
+  if (!legacy) return null;
+  return verifySession(legacy);
 }
 
 // 把 Google profile 映射成 T-Pass claims。

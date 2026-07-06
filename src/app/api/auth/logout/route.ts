@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
   const response = NextResponse.redirect(target, 303);
 
   // 刪 cookie：name / domain / path 必須與當初設定時一致，否則刪不掉。
+  // v1 共用 cookie 與 v2 host-only session 都清；消費端自己的 per-service cookie
+  // 由各消費端的 /api/auth/logout 清（見 INTEGRATION.md §登出）。
   response.cookies.set(authConfig.cookie.name, "", {
     httpOnly: true,
     sameSite: "lax",
@@ -33,6 +35,13 @@ export async function POST(request: NextRequest) {
     maxAge: 0,
     secure: authConfig.cookie.secure,
     domain: authConfig.cookie.domain,
+  });
+  response.cookies.set(authConfig.sessionCookieName, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+    secure: authConfig.cookie.secure,
   });
   return response;
 }
