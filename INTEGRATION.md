@@ -128,6 +128,31 @@ Cache-Control: public, max-age=3600
 - 這裡**只有公鑰**（`x`），沒有私鑰（`d`）。這是刻意的。
 - 可以快取（`max-age=3600`）；`createRemoteJWKSet` 會自動快取 + 遇到未知 `kid` 時重抓（含冷卻）。
 
+### 4.1 發證端（issuer）金鑰輪替 runbook
+
+消費端用 `createRemoteJWKSet` 已經是「依 `kid` 自動選鑰」，遇到未知 `kid` 會自動重抓
+JWKS——**輪替時消費端不用改任何程式碼**。以下是 auth 這邊（issuer）實際換鑰的步驟。
+
+**例行輪替（有 overlap，不會把人踢下線）：**
+
+1. `node scripts/gen-keys.mjs` 產生一組新的 EdDSA 金鑰對。
+2. 把現有的 `JWT_PUBLIC_KEY` / `JWT_KID`（舊鑰）搬去 `JWT_PREV_PUBLIC_KEY` / `JWT_PREV_KID`。
+3. 把新產生的私鑰、公鑰、kid 填進 `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` / `JWT_KID`。
+4. 重啟 auth。此刻 JWKS 同時公開新舊兩把公鑰，新簽的 token 用新 kid，
+   舊 kid 簽出去、還沒過期的 token 仍驗得過（overlap）。
+5. 等待 ≥ token TTL（預設 8 小時），確保所有帶舊 kid 的 token 都已自然過期。
+6. 清空 `JWT_PREV_PUBLIC_KEY` / `JWT_PREV_KID`，重啟 auth。輪替完成，舊鑰徹底下線。
+
+**緊急輪替（私鑰疑似外洩）：**
+
+1. 立刻產生新金鑰對，換上新的 `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` / `JWT_KID`、重啟。
+2. **不要**把外洩的舊鑰放進 `JWT_PREV_PUBLIC_KEY`——那等於繼續讓攻擊者偽造的 token 驗得過，
+   overlap 機制在這裡不適用。
+3. 注意傳播窗口：新簽的 token 帶新 kid，消費端遇到未知 kid 會立刻重抓 JWKS，這段很快；
+   但消費端**快取住的舊 JWKS**（還記得外洩那個 kid）在快取過期（`max-age=3600`，最長
+   約 1 小時）前，仍可能誤信用外洩私鑰偽造、帶舊 kid 的 token。若要縮短這個窗口，
+   可臨時調低 `/.well-known/jwks.json` 的 `max-age`（見本檔案第 4 節、`route.ts`）。
+
 ---
 
 ## 5. 驗章規則（安全關鍵，逐條必做）

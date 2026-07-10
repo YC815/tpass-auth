@@ -26,8 +26,20 @@ if (missing.length > 0) {
   );
 }
 
-// 簽章金鑰只有一把，固定 kid；未來輪替金鑰時子網域才認得出是哪一把。
-const KID = "tpass-key-1";
+// 簽章用的 kid：未設 env 時預設沿用舊值，既有部署行為不變。
+const signingKid = process.env.JWT_KID || "tpass-key-1";
+
+// JWKS 要公開的公鑰清單：目前簽章用的那把一定在，輪替期間（JWT_PREV_PUBLIC_KEY /
+// JWT_PREV_KID 都設了）再加上一把舊鑰供驗章 overlap；兩者皆未設則行為與輪替前完全一致。
+const publicKeys: { kid: string; pem: string }[] = [
+  { kid: signingKid, pem: process.env.JWT_PUBLIC_KEY! },
+];
+if (process.env.JWT_PREV_PUBLIC_KEY && process.env.JWT_PREV_KID) {
+  publicKeys.push({
+    kid: process.env.JWT_PREV_KID,
+    pem: process.env.JWT_PREV_PUBLIC_KEY,
+  });
+}
 
 const baseUrl = process.env.AUTH_BASE_URL!;
 
@@ -64,11 +76,11 @@ export const authConfig = {
   portalUrl: process.env.PORTAL_URL!,
   jwt: {
     privateKeyPem: process.env.JWT_PRIVATE_KEY!,
-    publicKeyPem: process.env.JWT_PUBLIC_KEY!,
     issuer: process.env.JWT_ISSUER!,
     audience: process.env.JWT_AUDIENCE!,
     ttlSeconds: Number(process.env.JWT_TTL_SECONDS!),
-    kid: KID,
+    signingKid,
+    publicKeys,
   },
 } as const;
 
