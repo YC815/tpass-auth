@@ -13,7 +13,7 @@ const tempCookieOptions = {
   sameSite: "lax" as const,
   path: "/",
   maxAge: 600,
-  secure: authConfig.cookie.secure,
+  secure: authConfig.cookieSecure,
 };
 
 export async function GET(request: NextRequest) {

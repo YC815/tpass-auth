@@ -74,10 +74,6 @@ async function sign(
     .sign(privateKey);
 }
 
-// v1（遷移期）：簽全生態共用 audience 的 session JWT。
-export const signSession = (claims: Omit<TPassClaims, "exp">) =>
-  sign(claims, authConfig.jwt.audience);
-
 // v2：簽 auth 自己的登入態（host-only cookie 用）。
 export const signAuthSession = (claims: Omit<TPassClaims, "exp">) =>
   sign(claims, AUTH_SELF_AUDIENCE);
@@ -91,9 +87,10 @@ export const signServiceToken = (
 
 // 用公鑰驗章。安全關鍵：必鎖 algorithms 防 alg confusion（公鑰被當對稱密鑰偽造 token）。
 // 失敗一律回 null，不把 error throw 給呼叫端。
+// audience 必填：驗哪一張票由呼叫端明講，不給預設值——預設值只會讓人忘記傳而驗錯對象。
 export async function verifySession(
   token: string,
-  audience: string = authConfig.jwt.audience,
+  audience: string,
 ): Promise<TPassClaims | null> {
   try {
     const publicKey = await getPublicKey();
@@ -115,18 +112,12 @@ export async function verifySession(
   }
 }
 
-// 讀 auth 目前的登入態：先看 v2 host-only cookie，遷移期 fallback 到 v1 共用 cookie
-// （既有登入者只有 v1 cookie，不 fallback 會全體被登出）。
+// 讀 auth 目前的登入態：v2 host-only cookie，沒有就是沒登入。
 export async function getSession(): Promise<TPassClaims | null> {
   const jar = await cookies();
   const own = jar.get(authConfig.sessionCookieName)?.value;
-  if (own) {
-    const claims = await verifySession(own, AUTH_SELF_AUDIENCE);
-    if (claims) return claims;
-  }
-  const legacy = jar.get(authConfig.cookie.name)?.value;
-  if (!legacy) return null;
-  return verifySession(legacy);
+  if (!own) return null;
+  return verifySession(own, AUTH_SELF_AUDIENCE);
 }
 
 // 把 Google profile 映射成 T-Pass claims。

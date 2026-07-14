@@ -5,7 +5,6 @@ import { google, isAllowedRedirect, OAUTH_COOKIES } from "@/lib/oauth";
 import {
   resolveClaims,
   signAuthSession,
-  signSession,
   type GoogleProfile,
 } from "@/lib/session";
 
@@ -80,20 +79,8 @@ export async function GET(request: NextRequest) {
     sameSite: "lax",
     path: "/",
     maxAge: authConfig.jwt.ttlSeconds,
-    secure: authConfig.cookie.secure,
+    secure: authConfig.cookieSecure,
   });
-
-  // v1（遷移期）：跨子網域共用 cookie，相容未升級消費端；全數升級後由 env 停發。
-  if (authConfig.issueLegacyCookie) {
-    response.cookies.set(authConfig.cookie.name, await signSession(claims), {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: authConfig.jwt.ttlSeconds,
-      secure: authConfig.cookie.secure,
-      domain: authConfig.cookie.domain,
-    });
-  }
 
   // 清掉暫存 cookie。
   response.cookies.delete(OAUTH_COOKIES.state);
