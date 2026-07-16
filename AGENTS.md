@@ -24,4 +24,4 @@ auth 只是發證服務，不是門戶。使用者理想上只會看到 **Google
 `services.json` 註冊表、`tpass` CLI 與部署流程，都在上層 **tpass-ops** repo 的
 `AGENTS.md` 與 `docs/`。對接合約以本 repo `INTEGRATION.md` 為權威。
 
-- 本機啟動一律用上層的 `scripts/tpass dev auth`（禁止裸 `npm run dev`）。
+- 本機啟動：`pnpm dev`（package.json 已設好 HTTPS + `auth.lvh.me:3000`）。★ auth **不加** `NODE_TLS_REJECT_UNAUTHORIZED`——它要驗 Google 的真憑證。

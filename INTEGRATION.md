@@ -376,7 +376,7 @@ callback（POST，form-encoded token+next）：
 3. 服務 id 已登記進 auth 的 `AUTH_SERVICE_IDS` 與 tpass-ops `services.json`？沒有→先登記。
 
 **實作步驟：**
-1. `npm install jose`（或該語言 JOSE 函式庫）。
+1. `pnpm add jose`（或該語言 JOSE 函式庫）。
 2. 設定模組集中放 env（§10 那七個），全部從 env 讀。
 3. 驗章模組：`createRemoteJWKSet` + `jwtVerify` 鎖 `algorithms:['EdDSA']` + `issuer` +
    `audience: 'tpass:<id>'`，失敗回 null（§5 四鐵則）。

@@ -22,7 +22,8 @@ scripts/tpass dev auth      # 或 tpass dev（全部服務）
 scripts/tpass check auth    # push 前：lint + tsc --noEmit
 ```
 
-**禁止裸 `npm run dev`。** env 必填清單以 `src/config/auth.ts` 的 `REQUIRED` 為準
+單獨跑本服務：`pnpm dev`（package.json 已設好 HTTPS + `auth.lvh.me:3000`；auth **不加**
+`NODE_TLS_REJECT_UNAUTHORIZED`——要驗 Google 真憑證）。env 必填清單以 `src/config/auth.ts` 的 `REQUIRED` 為準
 （範本 `.env.example`）；EdDSA 金鑰用 `node scripts/gen-keys.mjs` 產（不落盤、不進 git）。
 
 ## 結構速記
