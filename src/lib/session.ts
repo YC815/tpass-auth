@@ -31,20 +31,30 @@ export interface GoogleProfile {
 // PEM → CryptoKey 是 async，不能在 module top-level 同步做。
 // 用 module 級 cached promise 各載入一次。
 let privateKeyPromise: Promise<CryptoKey> | null = null;
-let publicKeyPromise: Promise<CryptoKey> | null = null;
+let publicKeysPromise: Promise<Map<string, CryptoKey>> | null = null;
 
 function getPrivateKey(): Promise<CryptoKey> {
   privateKeyPromise ??= importPKCS8(authConfig.jwt.privateKeyPem, "EdDSA");
   return privateKeyPromise;
 }
 
-function getPublicKey(): Promise<CryptoKey> {
-  publicKeyPromise ??= importSPKI(authConfig.jwt.publicKeyPem, "EdDSA");
-  return publicKeyPromise;
+// 依 kid 索引的公鑰表：平常只有一把（目前簽章用的），輪替期間會多一把舊鑰供驗章。
+async function loadPublicKeys(): Promise<Map<string, CryptoKey>> {
+  const entries = await Promise.all(
+    authConfig.jwt.publicKeys.map(
+      async ({ kid, pem }) => [kid, await importSPKI(pem, "EdDSA")] as const,
+    ),
+  );
+  return new Map(entries);
 }
 
-// 公鑰也給 JWKS route 用。
-export { getPublicKey };
+function getPublicKeys(): Promise<Map<string, CryptoKey>> {
+  publicKeysPromise ??= loadPublicKeys();
+  return publicKeysPromise;
+}
+
+// 公鑰表也給 JWKS route 用。
+export { getPublicKeys };
 
 // audience 命名慣例（契約 v2）：每個服務一個 aud=tpass:<serviceId>，token 只在該服務有效。
 export const serviceAudience = (serviceId: string) => `tpass:${serviceId}`;
@@ -65,7 +75,7 @@ async function sign(
     role: claims.role,
     grade: claims.grade,
   })
-    .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.kid })
+    .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.signingKid })
     .setSubject(claims.sub)
     .setIssuer(authConfig.jwt.issuer)
     .setAudience(audience)
@@ -93,12 +103,20 @@ export async function verifySession(
   audience: string,
 ): Promise<TPassClaims | null> {
   try {
-    const publicKey = await getPublicKey();
-    const { payload } = await jwtVerify(token, publicKey, {
-      algorithms: ["EdDSA"],
-      issuer: authConfig.jwt.issuer,
-      audience,
-    });
+    const keys = await getPublicKeys();
+    const { payload } = await jwtVerify(
+      token,
+      async (header) => {
+        const k = header.kid ? keys.get(header.kid) : undefined;
+        if (!k) throw new Error("unknown kid");
+        return k;
+      },
+      {
+        algorithms: ["EdDSA"],
+        issuer: authConfig.jwt.issuer,
+        audience,
+      },
+    );
     return {
       sub: payload.sub as string,
       email: payload.email as string,
