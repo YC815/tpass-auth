@@ -82,8 +82,7 @@
   "sub": "104857600293847561029",
   "email": "b11302042@tschool.tp.edu.tw",
   "name": "林大明",
-  "role": "student",
-  "grade": null,
+  "groups": ["admin"],
   "iss": "https://auth.lvh.me:3000",
   "aud": "tpass:form",
   "iat": 1750000000,
@@ -96,15 +95,15 @@
 | `sub` | `string` | ✓ | 使用者唯一識別碼（來自 Google 的 `sub`，跨服務一致、可當主鍵） |
 | `email` | `string` | ✓ | 學校信箱，已通過 `email_verified` 與網域白名單 |
 | `name` | `string` | ✓ | 顯示名稱 |
-| `role` | `string` | ✓ | 角色。目前 auth 尚未接學籍目錄，**一律先給 `"student"`**；未來會有 `"teacher"` 等 |
-| `grade` | `string \| null` | ✓ | 年級。目前**一律 `null`**（待接學籍目錄）。注意型別是 `string` 不是 `number` |
+| `groups` | `string[]` | ✓ | **授權章**：此持有人在**這個服務**（`aud` 對應的服務）屬於哪些群組（例 `["admin"]`、`["admin","super-admin"]`）。非管理員為 `[]`。這是 OIDC 標準的 group claim：**auth 中央發、各服務本地授權** |
 | `iss` | `string` | ✓ | 簽發者，必為 §2 的 issuer |
 | `aud` | `string` | ✓ | 受眾，必為 `tpass:<你的服務id>` |
 | `iat` / `exp` | `number` | ✓ | 簽發 / 到期時間（Unix 秒） |
 
-> ⚠️ `role` / `grade` 目前是 placeholder。**你的程式要能容忍 `grade` 為 `null`、`role` 恆為
-> `student`**，權限判斷請用自己服務內的 allowlist（參考各服務 `config/admin.ts` 模式），
-> **不要拿 `role` 當權限依據**。
+> ✅ **授權就讀 `groups`**：`groups.includes("admin")` 判斷管理員（`super-admin` 隱含 `admin`）。
+> 群組是**每個服務各自**的（同一人可能在 form 是 admin、在 appeals 不是），內容依 `aud` 對應服務決定。
+> 群組名單維護在**中央**（auth 的 `AUTH_GROUPS` 設定），各服務**不再自維護 allowlist / DB 名單**。
+> 「能讀哪筆資料」這種細粒度授權仍在各服務本地做（例：問卷回覆限 owner 或 super-admin）。
 
 ---
 
@@ -240,7 +239,7 @@ export async function verifyToken(token: string) {
       issuer: ISSUER,          // ★ 2. 檢查 iss
       audience: AUDIENCE,      // ★ 3. 檢查 aud（exp 由 jose 自動檢查 = 4）
     });
-    return payload; // { sub, email, name, role, grade, ... }
+    return payload; // { sub, email, name, groups, ... }
   } catch {
     return null;    // 過期 / 竄改 / 錯 iss/aud / 錯 alg → 一律視為未登入
   }

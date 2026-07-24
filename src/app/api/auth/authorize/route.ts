@@ -43,14 +43,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(login);
   }
 
-  // 重簽新 token（丟掉舊 exp，讓 per-service token 拿到完整 TTL）
+  // 重簽新 token（丟掉舊 exp，讓 per-service token 拿到完整 TTL）。
+  // groups 由 signServiceToken 依 serviceId 查設定後蓋上，不從 auth 登入態帶（登入態 groups 恆空）。
   const token = await signServiceToken(
     {
       sub: session.sub,
       email: session.email,
       name: session.name,
-      role: session.role,
-      grade: session.grade,
     },
     serviceId,
   );

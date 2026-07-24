@@ -8,17 +8,22 @@ import {
   importSPKI,
   type CryptoKey,
 } from "jose";
-import { authConfig } from "@/config/auth";
+import { authConfig, groupsFor } from "@/config/auth";
 
 // T-Pass 對接合約：簽進 JWT 的身分內容。
+// groups：契約 v2 的授權章——「這張證持有人在該服務屬於哪些群組」（例 admin / super-admin）。
+// per-service token 才會帶實際群組（依 aud 對應服務查），auth 自己的登入態 groups 一律為空。
+// 各消費端只讀 groups 決定權限，不再各自維護名單（OIDC 標準：IdP 發群組、各服務本地授權）。
 export interface TPassClaims {
   sub: string;
   email: string;
   name: string;
-  role: string;
-  grade: string | null;
+  groups: string[];
   exp: number;
 }
+
+// 身分本體（不含群組 / exp）：Google profile 映射出來的穩定識別。
+export type TPassIdentity = Pick<TPassClaims, "sub" | "email" | "name">;
 
 // Google userinfo endpoint 回傳的（我們用到的）欄位。
 export interface GoogleProfile {
@@ -62,8 +67,7 @@ async function sign(
   return new SignJWT({
     email: claims.email,
     name: claims.name,
-    role: claims.role,
-    grade: claims.grade,
+    groups: claims.groups,
   })
     .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.kid })
     .setSubject(claims.sub)
@@ -74,16 +78,19 @@ async function sign(
     .sign(privateKey);
 }
 
-// v2：簽 auth 自己的登入態（host-only cookie 用）。
-export const signAuthSession = (claims: Omit<TPassClaims, "exp">) =>
-  sign(claims, AUTH_SELF_AUDIENCE);
+// v2：簽 auth 自己的登入態（host-only cookie 用）。只存身份，groups 一律空——
+// 群組是「每個服務不同」的授權章，等 authorize 發 per-service token 時才依服務查。
+export const signAuthSession = (identity: TPassIdentity) =>
+  sign({ ...identity, groups: [] }, AUTH_SELF_AUDIENCE);
 
 // v2：簽 per-service token。aud=tpass:<id>，只在該服務有效——
 // 單一服務被攻破或子網域被接管，拿到的 token 在其他服務一律驗不過。
-export const signServiceToken = (
-  claims: Omit<TPassClaims, "exp">,
-  serviceId: string,
-) => sign(claims, serviceAudience(serviceId));
+// groups 依「該持有人在這個服務屬於哪些群組」查設定後蓋上（見 config/auth.ts 的 groupsFor）。
+export const signServiceToken = (identity: TPassIdentity, serviceId: string) =>
+  sign(
+    { ...identity, groups: groupsFor(identity.email, serviceId) },
+    serviceAudience(serviceId),
+  );
 
 // 用公鑰驗章。安全關鍵：必鎖 algorithms 防 alg confusion（公鑰被當對稱密鑰偽造 token）。
 // 失敗一律回 null，不把 error throw 給呼叫端。
@@ -103,8 +110,7 @@ export async function verifySession(
       sub: payload.sub as string,
       email: payload.email as string,
       name: payload.name as string,
-      role: payload.role as string,
-      grade: (payload.grade as string | null) ?? null,
+      groups: Array.isArray(payload.groups) ? (payload.groups as string[]) : [],
       exp: payload.exp as number,
     };
   } catch {
@@ -120,15 +126,11 @@ export async function getSession(): Promise<TPassClaims | null> {
   return verifySession(own, AUTH_SELF_AUDIENCE);
 }
 
-// 把 Google profile 映射成 T-Pass claims。
-// role / grade Google 不會給，dev 階段先用簡單預設。
-export function resolveClaims(profile: GoogleProfile): Omit<TPassClaims, "exp"> {
+// 把 Google profile 映射成 T-Pass 身份（不含群組——群組在發 per-service token 時才查）。
+export function resolveClaims(profile: GoogleProfile): TPassIdentity {
   return {
     sub: profile.sub,
     email: profile.email,
     name: profile.name,
-    // TODO: 接真實 user directory 取得 role / grade
-    role: "student",
-    grade: null,
   };
 }
