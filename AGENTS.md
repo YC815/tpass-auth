@@ -4,6 +4,26 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## auth 的定位：發證 + 權限真相，不是業務服務
+
+auth 的職責邊界是三件事，**不多不少**：
+
+1. **發證**：跑 Google OAuth 確認身分、簽 per-service EdDSA JWT、公開 JWKS。唯一持有私鑰者。
+2. **權限真相**：`permissions` claim 的資料來源——DB（Prisma：`Subject` / `Grant` / `AuditLog`）
+   記著每個人在每個服務的 role / restriction，簽 token 時查它。
+3. **權限管理介面**：`/admin` panel，管權限用。
+
+**不要在 auth 裡加任何業務功能**（問卷、跨屆代傳、申訴那類東西屬於消費端，不屬於發證端）。
+`/admin` 也不例外——它是「管這套權限系統」的介面，不是「TSchool 平台的後台」。
+
+**讀權限只走窄介面**：簽章路徑（`signServiceToken`）與 `/denied` 都只透過
+`src/lib/permissions/resolve.ts` 的 `permissionsFor(email, serviceId)` / `overviewFor(email)`
+兩支函式查權限，不直接碰 Prisma client 或 `src/lib/permissions/repo.ts`——這兩支函式已經包好
+superadmin 短路與 fail-open 降級，繞過它們等於重新引入一次這些邊界情況的 bug。
+`/admin` 的 server actions 是例外：它的工作就是**寫** Grant/Subject/AuditLog，本來就得直接呼叫
+`src/lib/permissions/repo.ts` 的 CRUD 函式；但每支 action 仍須自己呼叫
+`requireAuthModerator()` / `requireAuthAdmin()`，不能只靠 layout 擋。
+
 ## auth 不是使用者的目的地（UI 設計說明）
 
 auth 只是發證服務，不是門戶。使用者理想上只會看到 **Google 自己的登入介面**，而不是 tauth 的頁面：

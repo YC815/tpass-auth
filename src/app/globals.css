@@ -18,7 +18,20 @@
   --color-border:              oklch(0.21 0.01  264);
   --color-ring:                oklch(0.62 0.16  150);
 
+  --color-tone-green-bg:       oklch(0.96 0.05  150);
+  --color-tone-green-badge:    oklch(0.88 0.11  150);
+  --color-tone-green-text:     oklch(0.45 0.13  150);
+  --color-tone-blue-bg:        oklch(0.96 0.04  250);
+  --color-tone-blue-badge:     oklch(0.88 0.09  250);
+  --color-tone-blue-text:      oklch(0.46 0.15  250);
+  --color-tone-orange-bg:      oklch(0.96 0.05   60);
+  --color-tone-orange-badge:   oklch(0.88 0.11   60);
+  --color-tone-orange-text:    oklch(0.5  0.15   45);
+  --color-tone-violet-bg:      oklch(0.96 0.04  300);
+  --color-tone-violet-badge:   oklch(0.88 0.09  300);
+  --color-tone-violet-text:    oklch(0.48 0.16  300);
   --color-tone-rose-bg:        oklch(0.96 0.04  15);
+  --color-tone-rose-badge:     oklch(0.89 0.09  15);
   --color-tone-rose-text:      oklch(0.5  0.17  18);
 }
 
@@ -31,4 +44,10 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
   font-weight: 500;
+}
+
+/* /admin panel 的 ConfirmDialog 用原生 <dialog>：backdrop 統一在此維護
+   （Tailwind v4 沒有可靠的 backdrop: 變體，直接寫 ::backdrop 最笨但最清楚）。 */
+dialog::backdrop {
+  background: color-mix(in oklch, var(--color-foreground) 45%, transparent);
 }

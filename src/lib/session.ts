@@ -8,21 +8,25 @@ import {
   importSPKI,
   type CryptoKey,
 } from "jose";
-import { authConfig, groupsFor } from "@/config/auth";
+import { authConfig } from "@/config/auth";
+import { permissionsFor, overviewFor } from "@/lib/permissions/resolve";
+import { findSubjectByEmail } from "@/lib/permissions/repo";
+import type { PermissionMap } from "@/lib/permissions/types";
 
 // T-Pass 對接合約：簽進 JWT 的身分內容。
-// groups：契約 v2 的授權章——「這張證持有人在該服務屬於哪些群組」（例 admin / super-admin）。
-// per-service token 才會帶實際群組（依 aud 對應服務查），auth 自己的登入態 groups 一律為空。
-// 各消費端只讀 groups 決定權限，不再各自維護名單（OIDC 標準：IdP 發群組、各服務本地授權）。
+// permissions：Phase 4 新 claim，role+restriction 雙欄本體（見 lib/permissions/types.ts），
+// 是唯一的授權真相（Phase 7 已移除 groups 相容層）。
+// 一般服務 token 只帶自己一把 key（最小揭露）；大廳 token（AUTH_OVERVIEW_SERVICE_IDS）帶全服務 map。
 export interface TPassClaims {
   sub: string;
   email: string;
   name: string;
-  groups: string[];
+  permissions: PermissionMap;
+  iat: number;
   exp: number;
 }
 
-// 身分本體（不含群組 / exp）：Google profile 映射出來的穩定識別。
+// 身分本體（不含 permissions / iat / exp）：Google profile 映射出來的穩定識別。
 export type TPassIdentity = Pick<TPassClaims, "sub" | "email" | "name">;
 
 // Google userinfo endpoint 回傳的（我們用到的）欄位。
@@ -57,40 +61,61 @@ export const serviceAudience = (serviceId: string) => `tpass:${serviceId}`;
 // auth 自己登入態的 audience（host-only cookie 裡那顆）。
 const AUTH_SELF_AUDIENCE = serviceAudience("auth");
 
-// 以指定 audience 簽 JWT（共用簽章邏輯；aud 決定這顆 token 在哪裡有效）。
+// 以指定 audience／TTL 簽 JWT（共用簽章邏輯；aud 決定這顆 token 在哪裡有效）。
+// ttlSeconds 拆成參數而非共用一顆設定：auth 登入態（session）與 per-service token
+// 生命週期語意不同——session 要撐住整段瀏覽（太短會逼使用者頻繁重登 Google），
+// per-service token 要短（換票成本低，縮小外洩窗口）。
 async function sign(
-  claims: Omit<TPassClaims, "exp">,
+  claims: Omit<TPassClaims, "exp" | "iat">,
   audience: string,
+  ttlSeconds: number,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const privateKey = await getPrivateKey();
   return new SignJWT({
     email: claims.email,
     name: claims.name,
-    groups: claims.groups,
+    permissions: claims.permissions,
   })
     .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.kid })
     .setSubject(claims.sub)
     .setIssuer(authConfig.jwt.issuer)
     .setAudience(audience)
     .setIssuedAt(now)
-    .setExpirationTime(now + authConfig.jwt.ttlSeconds)
+    .setExpirationTime(now + ttlSeconds)
     .sign(privateKey);
 }
 
-// v2：簽 auth 自己的登入態（host-only cookie 用）。只存身份，groups 一律空——
-// 群組是「每個服務不同」的授權章，等 authorize 發 per-service token 時才依服務查。
+// v2：簽 auth 自己的登入態（host-only cookie 用）。只存身份，permissions 一律空——
+// 授權是「每個服務不同」的章，等 authorize 發 per-service token 時才依服務查；
+// 身分票本身不帶授權（登入態不是拿來對任何服務決定權限的）。
+// TTL 用 sessionTtlSeconds（長，預設 12h）：這是使用者「還算登入」的期間，
+// 太短會逼使用者對每個服務都重跑一次 Google OAuth。
 export const signAuthSession = (identity: TPassIdentity) =>
-  sign({ ...identity, groups: [] }, AUTH_SELF_AUDIENCE);
+  sign({ ...identity, permissions: {} }, AUTH_SELF_AUDIENCE, authConfig.jwt.sessionTtlSeconds);
 
 // v2：簽 per-service token。aud=tpass:<id>，只在該服務有效——
 // 單一服務被攻破或子網域被接管，拿到的 token 在其他服務一律驗不過。
-// groups 依「該持有人在這個服務屬於哪些群組」查設定後蓋上（見 config/auth.ts 的 groupsFor）。
-export const signServiceToken = (identity: TPassIdentity, serviceId: string) =>
-  sign(
-    { ...identity, groups: groupsFor(identity.email, serviceId) },
+// TTL 用 ttlSeconds（短，預設 45min）：per-service token 換發成本低（有 auth session
+// 就能重簽），故意設短以縮小外洩窗口，也是權限變更（ban/降級）的生效延遲上限。
+//
+// permissions（Phase 4）：一般服務只塞自己一把 key（最小揭露，別服務的 reason 不外洩）；
+// 若 serviceId ∈ AUTH_OVERVIEW_SERVICE_IDS（大廳／門戶）→ 塞全服務 map（含 "auth"），
+// 這是 portal 顯示 ban/warning 徽章與「權限管理」卡的資料來源。
+export async function signServiceToken(
+  identity: TPassIdentity,
+  serviceId: string,
+): Promise<string> {
+  const isOverview = authConfig.overviewServiceIds.includes(serviceId);
+  const permissions: PermissionMap = isOverview
+    ? await overviewFor(identity.email)
+    : { [serviceId]: await permissionsFor(identity.email, serviceId) };
+  return sign(
+    { ...identity, permissions },
     serviceAudience(serviceId),
+    authConfig.jwt.ttlSeconds,
   );
+}
 
 // 用公鑰驗章。安全關鍵：必鎖 algorithms 防 alg confusion（公鑰被當對稱密鑰偽造 token）。
 // 失敗一律回 null，不把 error throw 給呼叫端。
@@ -110,7 +135,8 @@ export async function verifySession(
       sub: payload.sub as string,
       email: payload.email as string,
       name: payload.name as string,
-      groups: Array.isArray(payload.groups) ? (payload.groups as string[]) : [],
+      permissions: (payload.permissions as PermissionMap | undefined) ?? {},
+      iat: payload.iat as number,
       exp: payload.exp as number,
     };
   } catch {
@@ -119,14 +145,29 @@ export async function verifySession(
 }
 
 // 讀 auth 目前的登入態：v2 host-only cookie，沒有就是沒登入。
+// Phase 3 補強：驗章成功後再比對 Subject.sessionsValidFrom——ban 時 panel 會把它設為 now()，
+// 早於這個時間簽出的 auth session 一律視同未登入（被 ban 者換不到任何新的 per-service 票）。
+// 只查 Subject 表（輕量、無 join），DB 掛掉 fail-open：查詢失敗不影響既有登入態。
 export async function getSession(): Promise<TPassClaims | null> {
   const jar = await cookies();
   const own = jar.get(authConfig.sessionCookieName)?.value;
   if (!own) return null;
-  return verifySession(own, AUTH_SELF_AUDIENCE);
+  const claims = await verifySession(own, AUTH_SELF_AUDIENCE);
+  if (!claims) return null;
+
+  try {
+    const subject = await findSubjectByEmail(claims.email);
+    if (subject?.sessionsValidFrom && claims.iat < Math.floor(subject.sessionsValidFrom.getTime() / 1000)) {
+      return null;
+    }
+  } catch (err) {
+    console.error(`[session] sessionsValidFrom 查詢失敗，降級為信任既有 token（fail-open）：`, err);
+  }
+
+  return claims;
 }
 
-// 把 Google profile 映射成 T-Pass 身份（不含群組——群組在發 per-service token 時才查）。
+// 把 Google profile 映射成 T-Pass 身份（不含權限——權限在發 per-service token 時才查）。
 export function resolveClaims(profile: GoogleProfile): TPassIdentity {
   return {
     sub: profile.sub,

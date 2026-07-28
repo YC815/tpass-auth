@@ -15,6 +15,8 @@ const REQUIRED = [
   "JWT_PUBLIC_KEY",
   "JWT_ISSUER",
   "JWT_TTL_SECONDS",
+  "DATABASE_URL",
+  "AUTH_SUPERADMINS",
 ] as const;
 
 const missing = REQUIRED.filter((key) => !process.env[key]);
@@ -27,27 +29,10 @@ if (missing.length > 0) {
 // 簽章金鑰只有一把，固定 kid；未來輪替金鑰時子網域才認得出是哪一把。
 const KID = "tpass-key-1";
 
-const baseUrl = process.env.AUTH_BASE_URL!;
+// auth 登入態 TTL 預設 12h：選填 env，沒設就用這個（不像 per-service TTL 那樣逼你想清楚）。
+const DEFAULT_SESSION_TTL_SECONDS = 43200;
 
-// 授權群組設定（簡易版）：一份唯讀 env（AUTH_GROUPS，JSON），型別 email → { serviceId: groups[] }。
-//   例：{"alice@tschool...": {"form": ["admin","super-admin"], "appeals": ["admin"]}}
-// 這是「中央管會員、各服務本地授權」的中央那份；未來要圖形管理台時改由 directory 服務餵入，
-// 消費端與 token 格式都不動（見 docs 計畫）。缺省＝沒有人有任何群組（非管理員）。
-type GroupMap = Record<string, Record<string, string[]>>;
-function parseGroups(raw: string | undefined): GroupMap {
-  if (!raw || !raw.trim()) return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("[config/auth] AUTH_GROUPS 不是合法 JSON（email → { serviceId: string[] }）");
-  }
-  const out: GroupMap = {};
-  for (const [email, perService] of Object.entries(parsed as GroupMap)) {
-    out[email.toLowerCase()] = perService;
-  }
-  return out;
-}
+const baseUrl = process.env.AUTH_BASE_URL!;
 
 export const authConfig = {
   google: {
@@ -66,8 +51,21 @@ export const authConfig = {
   // v2：可申請 per-service token 的服務 id 白名單（逗號分隔，例 portal,form,msg,appeals）。
   // 每個服務拿到的 token aud=tpass:<id>，只在該服務有效——單一服務被攻破不再等於全生態淪陷。
   serviceIds: process.env.AUTH_SERVICE_IDS!.split(",").map((s) => s.trim()).filter(Boolean),
-  // email → { serviceId: groups[] }。授權群組真相（見上方 parseGroups）。
-  groups: parseGroups(process.env.AUTH_GROUPS),
+  // 逃生門：生態總管，恆為所有服務 admin、不進 DB、DB 掛掉照樣有效。
+  // 逗號分隔 email；一律小寫正規化（跟 Subject.email 查找鍵一致）。
+  superadmins: process.env.AUTH_SUPERADMINS!
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  // Phase 4：哪些服務的 per-service token 帶「全服務 permissions map」而非只有自己一把 key。
+  // 目前只有大廳（portal）需要——顯示各服務 ban/warning 徽章與「權限管理」卡。
+  // 選填，預設 ["portal"]；逗號分隔。
+  overviewServiceIds: (process.env.AUTH_OVERVIEW_SERVICE_IDS ?? "portal")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  // /denied 頁「申訴」按鈕的連結；選填，未設就不顯示該按鈕。
+  appealUrl: process.env.AUTH_APPEAL_URL || undefined,
   // redirect_uri 白名單的根網域。比對時用 host === base || host.endsWith('.'+base)。
   allowedHostSuffix: process.env.AUTH_ALLOWED_HOST_SUFFIX!,
   // 只放行此 email 網域（不含 @）。
@@ -80,13 +78,13 @@ export const authConfig = {
     publicKeyPem: process.env.JWT_PUBLIC_KEY!,
     issuer: process.env.JWT_ISSUER!,
     ttlSeconds: Number(process.env.JWT_TTL_SECONDS!),
+    // auth 自己登入態的 TTL（長，選填）：這是「還算登入」的期間，跟 per-service
+    // token 的 45min 語意不同——太短會逼使用者對每個服務都重跑一次 Google OAuth。
+    sessionTtlSeconds: Number(
+      process.env.AUTH_SESSION_TTL_SECONDS ?? DEFAULT_SESSION_TTL_SECONDS,
+    ),
     kid: KID,
   },
 } as const;
 
 export type AuthConfig = typeof authConfig;
-
-// 查某人在某服務屬於哪些群組（發 per-service token 時用）。查無＝空陣列（非管理員）。
-export function groupsFor(email: string, serviceId: string): string[] {
-  return authConfig.groups[email.toLowerCase()]?.[serviceId] ?? [];
-}

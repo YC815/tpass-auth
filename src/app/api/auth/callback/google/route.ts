@@ -7,6 +7,7 @@ import {
   signAuthSession,
   type GoogleProfile,
 } from "@/lib/session";
+import { upsertSubjectOnLogin } from "@/lib/permissions/repo";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,15 @@ export async function GET(request: NextRequest) {
   }
 
   const claims = resolveClaims(profile);
+
+  // 回填 Subject（email/sub/name/lastSeenAt）：非阻斷，DB 寫入失敗只 log，登入照常完成——
+  // 這只是權限系統的輔助資料（讓 panel 認得出這個人已登入過），不是登入本身的必要條件。
+  try {
+    await upsertSubjectOnLogin({ email: claims.email, sub: claims.sub, name: claims.name });
+  } catch (err) {
+    console.error("[callback] upsert Subject 失敗（非阻斷，登入照常完成）：", err);
+  }
+
   const response = NextResponse.redirect(redirectTarget);
 
   // v2：auth 自己的登入態，host-only（不設 Domain）——只有 auth 網域收得到。
@@ -78,7 +88,9 @@ export async function GET(request: NextRequest) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    maxAge: authConfig.jwt.ttlSeconds,
+    // TTL 用 sessionTtlSeconds——跟 signAuthSession 簽的 exp 對齊，
+    // 不能沿用 per-service 的 ttlSeconds（否則 cookie 45min 就先於 JWT 過期消失）。
+    maxAge: authConfig.jwt.sessionTtlSeconds,
     secure: authConfig.cookieSecure,
   });
 

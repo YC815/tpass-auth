@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authConfig } from "@/config/auth";
 import { isAllowedRedirect } from "@/lib/oauth";
 import { getSession, signServiceToken } from "@/lib/session";
+import { permissionsFor } from "@/lib/permissions/resolve";
 
 export const runtime = "nodejs";
 
@@ -43,8 +44,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(login);
   }
 
+  // ban 攔截：查該人在這個服務的權限，read===false（restriction=ban 且未過期）就不簽 token，
+  // 直接導去 /denied——reason 絕不放進這裡的 query string，/denied 自己憑 session 重查。
+  const perm = await permissionsFor(session.email, serviceId);
+  if (!perm.read) {
+    const denied = new URL("/denied", authConfig.baseUrl);
+    denied.searchParams.set("service", serviceId);
+    return NextResponse.redirect(denied);
+  }
+
   // 重簽新 token（丟掉舊 exp，讓 per-service token 拿到完整 TTL）。
-  // groups 由 signServiceToken 依 serviceId 查設定後蓋上，不從 auth 登入態帶（登入態 groups 恆空）。
+  // permissions 由 signServiceToken 依 serviceId 查（DB），不從 auth 登入態帶（登入態 permissions 恆空）。
   const token = await signServiceToken(
     {
       sub: session.sub,

@@ -69,41 +69,127 @@
 | **audience（`aud`）** | `tpass:<你的服務id>`（例 `tpass:form`）— 驗章時**必須檢查**，不是 v1 的 `tschool-sso` |
 | **JWKS 公鑰來源** | `GET https://auth.lvh.me:3000/.well-known/jwks.json` |
 | **登出** | 你自己的 `POST /api/auth/logout`：清自己的 cookie → form POST 到 auth `POST /api/auth/logout?redirect_uri=<你的完整網址>`（清 auth 登入態） |
-| **token 有效期** | 8 小時（`exp - iat`） |
+| **per-service token 有效期** | `JWT_TTL_SECONDS`（auth 端設定，建議 45 分鐘＝2700 秒；必填、無內建預設）——也是權限變更（ban／降級）對已發 token 的生效延遲上限，見 [§3.5](#35-權限變更的生效時間) |
+| **auth 登入態（session）有效期** | `AUTH_SESSION_TTL_SECONDS`（auth 端設定，選填，預設 43200 秒＝12 小時）——這是「還算登入」的期間，刻意跟上面的 per-service token 分開設定，太短會逼使用者對每個服務都重跑一次 Google OAuth |
+| **被封鎖（ban）** | `authorize` 查到你在該服務 `restriction=ban`（未過期）→ 不簽 token，302 到 `<issuer>/denied?service=<id>`（reason 不進 URL，該頁憑 auth 自己的登入態重查資料庫），見 [§7.3](#73-被封鎖ban) |
 
 ---
 
 ## 3. JWT Payload 欄位定義
 
-你的 callback 收到的 `token` 是一個 JWT，其 payload：
+你的 callback 收到的 `token` 是一個 JWT。`permissions` 是唯一的授權本體，形狀依你的服務類型而不同
+（§3.1／§3.2）。舊版曾有 `groups` 過渡期相容層，已於 Phase 7（2026-07-27）從程式碼與 payload
+全面移除，退場紀錄見附錄 B。
+
+### 3.1 一般服務 token
+
+一般服務（`aud=tpass:<你的服務id>`，不在 auth 的 `AUTH_OVERVIEW_SERVICE_IDS` 內）的
+`permissions` 只帶**自己**這把 key——最小揭露，別的服務的 ban/warning 原因不會外洩給你：
 
 ```json
 {
   "sub": "104857600293847561029",
   "email": "b11302042@tschool.tp.edu.tw",
   "name": "林大明",
-  "groups": ["admin"],
+  "permissions": {
+    "form": { "read": true, "role": "admin" }
+  },
   "iss": "https://auth.lvh.me:3000",
   "aud": "tpass:form",
   "iat": 1750000000,
-  "exp": 1750028800
+  "exp": 1750002700
 }
 ```
+
+### 3.2 大廳（overview）token
+
+服務 id 若在 auth 的 `AUTH_OVERVIEW_SERVICE_IDS`（選填，預設只有 `portal`）內，`permissions`
+帶**全服務的 map**（含 `auth` 自己）——這是大廳顯示每個服務 ban/warning 徽章、以及判斷
+「這個人是不是任何服務的 admin/moderator」（要不要顯示「權限管理」入口）的資料來源：
+
+```json
+{
+  "sub": "104857600293847561029",
+  "email": "b11302042@tschool.tp.edu.tw",
+  "name": "林大明",
+  "permissions": {
+    "auth":    { "read": true,  "role": "admin" },
+    "form":    { "read": true,  "role": "admin" },
+    "msg":     { "read": true,  "role": "default" },
+    "appeals": { "read": false, "role": "default", "restriction": "ban", "reason": "濫用申訴系統", "until": 1750100000 },
+    "vote":    { "read": true,  "role": "default", "restriction": "warning", "reason": "多次投票異常" }
+  },
+  "iss": "https://auth.lvh.me:3000",
+  "aud": "tpass:portal",
+  "iat": 1750000000,
+  "exp": 1750002700
+}
+```
+
+### 3.3 欄位定義
 
 | 欄位 | 型別 | 必有 | 意義 |
 | --- | --- | --- | --- |
 | `sub` | `string` | ✓ | 使用者唯一識別碼（來自 Google 的 `sub`，跨服務一致、可當主鍵） |
 | `email` | `string` | ✓ | 學校信箱，已通過 `email_verified` 與網域白名單 |
 | `name` | `string` | ✓ | 顯示名稱 |
-| `groups` | `string[]` | ✓ | **授權章**：此持有人在**這個服務**（`aud` 對應的服務）屬於哪些群組（例 `["admin"]`、`["admin","super-admin"]`）。非管理員為 `[]`。這是 OIDC 標準的 group claim：**auth 中央發、各服務本地授權** |
+| `permissions` | `Record<string, PermissionEntry>` | ✓ | **權限本體**，見下方型別與 §3.4 |
 | `iss` | `string` | ✓ | 簽發者，必為 §2 的 issuer |
 | `aud` | `string` | ✓ | 受眾，必為 `tpass:<你的服務id>` |
 | `iat` / `exp` | `number` | ✓ | 簽發 / 到期時間（Unix 秒） |
 
-> ✅ **授權就讀 `groups`**：`groups.includes("admin")` 判斷管理員（`super-admin` 隱含 `admin`）。
-> 群組是**每個服務各自**的（同一人可能在 form 是 admin、在 appeals 不是），內容依 `aud` 對應服務決定。
-> 群組名單維護在**中央**（auth 的 `AUTH_GROUPS` 設定），各服務**不再自維護 allowlist / DB 名單**。
-> 「能讀哪筆資料」這種細粒度授權仍在各服務本地做（例：問卷回覆限 owner 或 super-admin）。
+`PermissionEntry`：
+
+```ts
+type Role        = "admin" | "moderator" | "default";
+type Restriction = "none"  | "warning"   | "ban";
+
+interface PermissionEntry {
+  read: boolean;             // 必有。唯一必看欄位，auth 已經算好（= restriction !== "ban"）
+  role: Role;                // 必有。admin 隱含 moderator
+  restriction?: Restriction; // 省略＝none
+  reason?: string;           // 只在 restriction !== "none" 時出現
+  until?: number;            // 選填 Unix 秒，管制到期自動解除（過期即視同 none，role 不受影響）
+}
+```
+
+> ⚠️ **解析安全預設值（務必實作）**：`permissions` 缺、或缺你要查的 serviceId 這把 key
+> （舊票、或非 overview 服務去查別的 serviceId）→ 一律當成 `{ read: true, role: "default" }`，
+> 不要因為缺資料就誤鎖使用者。參考實作：`tpass-portal/src/lib/tpass-auth.ts` 的 `permOf()`。
+
+### 3.4 權限模型
+
+- **`role`**：三級，`admin` 隱含 `moderator` 的所有能力。`default` 是一般使用者，不用特別判斷。
+- **`restriction`**：`warning`（提醒，仍可使用）與 `ban`（禁止使用）。**呈現方式由各模組自訂**——
+  `warning` 沒有固定版型，`tpass-portal/src/components/WarningBanner.tsx` 是可抄的範本。
+- **`read` 是唯一必看欄位**：auth 已經把 `restriction !== "ban"` 算成這個布林值，你不需要自己重
+  算 ban 邏輯。消費端守門就一行：
+
+  ```ts
+  if (!perm.read) redirect(`${process.env.AUTH_DENIED_URL}?service=${TPASS_SERVICE_ID}`);
+  ```
+
+  正常情況下這行幾乎不會觸發——`authorize` 在簽 token 前就攔截了 ban（見 §7.3），你拿到的票本來
+  就是「當下沒被 ban」的。這行是防「舊票在被 ban 之後、過期之前」窗口的防禦層，細節見 §3.5。
+- 權限真相與管理介面都在 auth（DB + `/admin` panel）；**你的服務不再自維護 admin allowlist**。
+
+### 3.5 權限變更的生效時間
+
+- 管理員在 auth 的 `/admin` panel 改權限，寫的是資料庫；**你手上已簽出的 per-service token
+  不會被追改**。生效延遲上限＝簽發當時的 `JWT_TTL_SECONDS`（建議 45 分鐘）——使用者下次換票
+  （token 過期後重新走 authorize）才會拿到新權限。panel 存檔後會顯示「最晚 HH:MM 生效」。
+- 例外：**被 ban 的人，auth 登入態立即失效**（`Subject.sessionsValidFrom`，panel ban 時寫入
+  `now()`）——他換不到任何新的 per-service token，即使你手上的 token 還沒過期也續不了。已經
+  拿到手、還沒過期的舊 per-service token 仍會活到自己的 `exp`（同一個上限）。
+- **刻意不做即時 revocation**：無狀態本地驗章（消費端驗完全不回呼 auth）是契約 v2 的地基——
+  要做到「改權限立刻生效」等於要求每個請求都回頭問 auth，等於放棄 v2 換來的隔離與可用性。
+  這個取捨已在 `docs/SECURITY-REVIEW.md` 立案接受。
+
+### 3.6 已退場：`groups` claim
+
+舊版曾有 `groups` claim（由 `permissions` 的 `role` 推導而來的過渡期相容層），已於 Phase 7
+（2026-07-27）從 auth 簽發邏輯與所有消費端程式碼中移除。**新串接的服務只認 `permissions`**，
+不會再看到 `groups` 欄位。歷史推導規則與退場時程見附錄 B。
 
 ---
 
@@ -210,8 +296,25 @@ v2 的登出是**你自己的 route**（因為你自己的 cookie 只有你能�
   → 303 導回你的服務（帶 ?logout=1，純畫面提示，不是身分憑證）
 ```
 
-其他服務的 per-service cookie 會留到各自 `exp` 過期（≤8h）——這是 v2 用「隔離」換來的已知
-取捨：登出不再是全生態即時，而是「auth 不再發新票 + 舊票自然過期」。
+其他服務的 per-service cookie 會留到各自 `exp` 過期（≤ `JWT_TTL_SECONDS`）——這是 v2 用「隔離」
+換來的已知取捨：登出不再是全生態即時，而是「auth 不再發新票 + 舊票自然過期」。
+
+### 7.3 被封鎖（ban）
+
+`authorize`（§7.1 步驟 2）簽 token 前會先查你在該服務的權限。若查到 `restriction=ban`
+且未過期：
+
+```
+auth 有登入態 → 查權限 → restriction=ban（未過期）
+  → 不簽 token，302 到 <issuer>/denied?service=<你的服務id>
+```
+
+- **`reason` 絕不進 URL**——`/denied` 頁憑使用者的 auth 登入態重查資料庫拿原因，query string
+  只帶 `service`，不會在瀏覽器歷史 / Referer / log 裡留下管制原因。
+- `/denied` 是 auth 自己的頁面（不是你的服務要做的事），畫面含原因、解封時間（若有 `until`）、
+  申訴連結（`AUTH_APPEAL_URL`，選填）、回門戶、登出。
+- 你的服務**不會**在正常流程中收到 `read:false` 的 token——ban 在這裡就被攔下了。§3.5 講的
+  「舊票窗口」才會讓你的 callback/守門邏輯真的遇到 `read:false`，那是防禦層，不是主流程。
 
 ---
 
@@ -239,7 +342,7 @@ export async function verifyToken(token: string) {
       issuer: ISSUER,          // ★ 2. 檢查 iss
       audience: AUDIENCE,      // ★ 3. 檢查 aud（exp 由 jose 自動檢查 = 4）
     });
-    return payload; // { sub, email, name, groups, ... }
+    return payload; // { sub, email, name, permissions, ... }（§3）
   } catch {
     return null;    // 過期 / 竄改 / 錯 iss/aud / 錯 alg → 一律視為未登入
   }
@@ -346,8 +449,9 @@ callback（POST，form-encoded token+next）：
 | `AUTH_AUTHORIZE_URL` | `<issuer>/api/auth/authorize` | 隨 issuer 變 |
 | `AUTH_LOGOUT_URL` | `<issuer>/api/auth/logout` | 隨 issuer 變 |
 | `<SVC>_SELF_URL` | `https://foo.lvh.me:3002` | ✓ 換正式網域 |
+| `AUTH_DENIED_URL`（選填） | `<issuer>/denied` | 隨 issuer 變（沒設就用 `AUTH_AUTHORIZE_URL` 的 origin 自動推導，通常不用另外設）——`read:false` 守門（§3.4）要導去的頁面 |
 
-（就這六個。**不要**再加 `JWT_AUDIENCE` / `TPASS_COOKIE_NAME`——那是已移除的 v1 遺物。）
+（六個必填 + 一個選填。**不要**再加 `JWT_AUDIENCE` / `TPASS_COOKIE_NAME`——那是已移除的 v1 遺物。）
 
 ---
 
@@ -362,7 +466,7 @@ callback（POST，form-encoded token+next）：
 | 登入後又立刻被導回登入 | ①cookie 沒寫成功（Secure 但你走 http？）②每請求驗章用錯 aud ③cookie 名不一致 |
 | 一直 `/?error=domain` | 登入的 Google 帳號不在允許網域 |
 | 驗章一直失敗但 token 看起來正常 | 沒鎖 `algorithms:['EdDSA']`、或 iss/aud 字串不一致（port、結尾斜線） |
-| token 過幾小時失效 | 正常，TTL 8 小時 |
+| token 過一段時間就失效 | 正常，per-service token TTL＝`JWT_TTL_SECONDS`（建議 45 分鐘）；auth 登入態撐比較久（`AUTH_SESSION_TTL_SECONDS`，預設 12 小時），過期後重走 authorize 會自動換到新票 |
 | 純前端拿不到 cookie | 正常（HttpOnly），需要薄後端（§6） |
 
 ---
@@ -392,6 +496,8 @@ callback（POST，form-encoded token+next）：
 - [ ] callback 對「過期 / 竄改 / 錯 aud / HS256+公鑰簽」四種假 token 都回 401。
 - [ ] callback 的 `next` 擋掉 `https://evil.com`、`//evil.com`（只允許站內路徑）。
 - [ ] 前端 JS 沒有讀 token、`localStorage` 沒有 token。
+- [ ] `permOf(session)` 解析用了安全預設值（缺 claim / 缺 serviceId → `{read:true, role:"default"}`），且 `read===false` 時確實導去 `AUTH_DENIED_URL?service=<id>`（§3.4）。
+- [ ] `restriction==="warning"` 有呈現給使用者看（版型自訂，可抄 `WarningBanner`），不是只解析出來沒顯示。
 
 **絕對不要做：**
 - ❌ 不要自動化 Google 登入（會被擋、違反條款）。要真人登入時停下來請使用者操作。
@@ -420,3 +526,20 @@ fallback 會照單全收。隔離不能靠一個設定值撐著；把路砍掉�
 
 > 現在只有一條路：per-service token（`aud=tpass:<id>`）+ host-only cookie。
 > 在任何地方看到 `tschool-sso`、`tpass_session`、`Domain=.<根網域>`，那都是歷史，不是現況。
+
+---
+
+## 附錄 B：`groups` claim 退場時程（已結案，2026-07-27）
+
+`groups` 曾是 §3.6 講的過渡期相容層，由 `permissions` 的 `role` 推導而來，從來不是獨立真相。
+
+| 階段 | 狀態 |
+| --- | --- |
+| 開發期雙發 | auth 同時簽 `groups` + `permissions`；`AUTH_GROUPS` env 當時已停用，改由 DB（Subject/Grant）推導，僅 `scripts/seed-from-env.mjs` 讀一次性灌資料用 |
+| 消費端遷移 | 各服務（form/msg/appeals/vote…）把授權判斷從 `groups.includes(...)` 改成 `permOf(session).role`／`.read`，開發期內完成，未曾在正式站雙發過 |
+| **退場（2026-07-27）** | 從 auth `sign()` payload 移除 `groups` 欄位、刪 `groupsFromRole()`；五個消費端同步移除 `TPassClaims.groups` 與解析行；本文件同步移除相關欄位與範例 |
+
+**結案說明**：雙發期本質上等於開發期——`groups` 從未在正式站單獨上線過一段時間，正式站部署
+是直接從「全部服務讀 `groups`」跳到「全部服務讀 `permissions`」，六個服務一次一起上，不存在
+正式站雙軌並行的窗口。`scripts/seed-from-env.mjs` 仍保留，供正式站部署當下把 `AUTH_GROUPS`
+一次性灌進 DB；灌完即可從主機 `.env` 移除該變數，該腳本屆時也可一併刪除。

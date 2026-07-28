@@ -1,0 +1,53 @@
+// tpass-auth 資料模型。auth 是生態系的權限真相來源：Subject 是「誰」，
+// Grant 是「誰在哪個服務屬於什麼角色／被什麼管制」，AuditLog 是「誰動了誰的權限」。
+// 不建 Service 表——服務清單真相是 authConfig.serviceIds（讀 services.json 派生的 env）。
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Subject {
+  id                String    @id @default(cuid())
+  email             String    @unique // 一律小寫正規化；主要查找鍵
+  sub               String?   @unique // Google sub，首次登入時回填
+  name              String?
+  sessionsValidFrom DateTime? // ban 時寫入：早於此 iat 的 auth session 一律無效（Phase 3 使用，先進 schema）
+  lastSeenAt        DateTime?
+  createdAt         DateTime  @default(now())
+  grants            Grant[]
+}
+
+model Grant {
+  id          String    @id @default(cuid())
+  subjectId   String
+  subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  serviceId   String
+  role        String    @default("default") // admin | moderator | default
+  restriction String    @default("none") // none | warning | ban
+  reason      String?
+  expiresAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+  updatedBy   String?
+
+  @@unique([subjectId, serviceId])
+  @@index([serviceId, role])
+  @@index([serviceId, restriction])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  at          DateTime @default(now())
+  actorEmail  String
+  targetEmail String
+  serviceId   String
+  action      String
+  before      Json?
+  after       Json?
+
+  @@index([at])
+  @@index([targetEmail])
+}
