@@ -6,10 +6,12 @@ import { AdminSidebar, AdminTabBar } from "./AdminNav";
 export function AdminShell({
   email,
   serviceIds,
+  canBulk,
   children,
 }: {
   email: string;
   serviceIds: string[];
+  canBulk: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -38,10 +40,10 @@ export function AdminShell({
         </div>
       </header>
 
-      <AdminTabBar serviceIds={serviceIds} />
+      <AdminTabBar serviceIds={serviceIds} canBulk={canBulk} />
 
       <div className="mx-auto flex w-full max-w-6xl flex-1 gap-8 px-4 py-8 sm:px-6">
-        <AdminSidebar serviceIds={serviceIds} />
+        <AdminSidebar serviceIds={serviceIds} canBulk={canBulk} />
         <main className="min-w-0 flex-1">{children}</main>
       </div>
     </div>

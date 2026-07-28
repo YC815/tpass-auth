@@ -2,38 +2,16 @@
 // 只帶 ?service=<id>——reason 絕不進 query string，這裡憑 session 重查 DB 取得。
 // 無 session → 不揭露任何資訊，直接送回首頁（會再導去登入）。
 // 有 session 但這服務其實沒被 ban（沒紀錄／已過期／service id 不明）→ 送回門戶，不留在這頁。
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { authConfig } from "@/config/auth";
+
+export const metadata: Metadata = { title: "拒絕存取 — T-Pass" };
 import { permissionsFor } from "@/lib/permissions/resolve";
-
-// 用 formatToParts 手動拼字串，不靠 locale 的預設分隔符/補零習慣（en-CA/zh-Hant-TW 在不同
-// Node/ICU 版本下輸出格式會飄），時區固定 Asia/Taipei——伺服器所在時區未必是台灣。
-function taipeiParts(unixSeconds: number) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(unixSeconds * 1000);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  // hour12:false 在部分 ICU 下午夜會給 "24"，校正回 "00"。
-  const hour = get("hour") === "24" ? "00" : get("hour");
-  return { year: get("year"), month: get("month"), day: get("day"), hour, minute: get("minute") };
-}
-
-function formatDateTime(unixSeconds: number): string {
-  const p = taipeiParts(unixSeconds);
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
-}
-
-function formatTime(unixSeconds: number): string {
-  const p = taipeiParts(unixSeconds);
-  return `${p.hour}:${p.minute}`;
-}
+// 時間格式化本來寫在這個檔裡（連同「不要相信 locale 預設輸出」的理由）。
+// 後台也需要同一套，已抽到 lib/format-time.ts——不要在這裡再長第二份出來。
+import { formatDateTimeFromUnix, formatTimeFromUnix } from "@/lib/format-time";
 
 // 獨立成 helper（而非直接在 component 內呼叫 Date.now()）：react-hooks/purity 規則
 // 禁止在 component render body 內直接呼叫不純函式；包一層即可，語意不變。
@@ -104,13 +82,13 @@ export default async function DeniedPage({
               <p className="mt-5 font-mono text-xs font-bold uppercase tracking-widest text-tone-rose-badge">
                 解封時間
               </p>
-              <p className="mt-1 font-mono font-bold">{formatDateTime(perm.until)}</p>
+              <p className="mt-1 font-mono font-bold">{formatDateTimeFromUnix(perm.until)}</p>
             </>
           )}
         </div>
 
         <p className="rounded-md border-2 border-foreground bg-tone-orange-bg px-4 py-3 text-center text-sm font-bold text-tone-orange-text">
-          若你仍能開啟 {serviceId} 的部分頁面，那是尚未過期的舊通行證，最晚 {formatTime(staleUntilSeconds)} 失效。
+          若你仍能開啟 {serviceId} 的部分頁面，那是尚未過期的舊通行證，最晚 {formatTimeFromUnix(staleUntilSeconds)} 失效。
         </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">

@@ -1,9 +1,10 @@
 // /admin/people/[email]：主力編輯頁。每個 serviceId 一列 role/restriction/reason/到期。
-import Link from "next/link";
+import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getAuthPerm } from "@/lib/admin-guard";
 import { authConfig } from "@/config/auth";
 import { findSubjectWithGrants } from "@/lib/permissions/repo";
+import { isValidEmail } from "@/lib/permissions/parse-emails";
 import { toEntry } from "@/lib/permissions/resolve";
 import { Card, Badge } from "@/components/admin/primitives";
 import { GrantRow, ROLE_RANK } from "./GrantRow";
@@ -23,25 +24,15 @@ export default async function PersonPage({
   const perm = session ? await getAuthPerm(session) : null;
   const canChangeRole = perm?.role === "admin";
 
+  // 網址是使用者打得出來的東西，先擋掉明顯不是 email 的字串，別讓後面的儲存把垃圾寫進 DB。
+  if (!isValidEmail(email)) notFound();
+
   const isSuperadmin = authConfig.superadmins.includes(email);
   const subject = isSuperadmin ? null : await findSubjectWithGrants(email);
 
-  if (!isSuperadmin && !subject) {
-    return (
-      <div className="space-y-4">
-        <h1 className="font-mono text-2xl font-extrabold tracking-tight">{email}</h1>
-        <Card>
-          <p className="font-medium text-muted-foreground">這個 email 還沒有 Subject 記錄。</p>
-          <Link
-            href="/admin/people/new"
-            className="mt-3 inline-block font-bold text-accent hover:underline"
-          >
-            前往新增 →
-          </Link>
-        </Card>
-      </div>
-    );
-  }
+  // 沒有 Subject 記錄不再是死路——照常顯示一份全 default 的空白列，按下儲存才會建 row
+  // （saveGrant 會自己 upsert）。純瀏覽不寫入，所以亂打網址也不會生出髒資料。
+  const isNew = !isSuperadmin && !subject;
 
   const serviceIds = [...new Set([...authConfig.serviceIds, "auth"])];
   const grantByService = new Map((subject?.grants ?? []).map((g) => [g.serviceId, g]));
@@ -51,6 +42,11 @@ export default async function PersonPage({
       <div>
         <h1 className="font-mono text-2xl font-extrabold tracking-tight">{email}</h1>
         {subject?.name && <p className="mt-1 font-medium text-muted-foreground">{subject.name}</p>}
+        {isNew && (
+          <p className="mt-1 font-medium text-muted-foreground">
+            尚未建立記錄——設定任一服務的權限後就會自動建立。
+          </p>
+        )}
       </div>
 
       {isSuperadmin ? (

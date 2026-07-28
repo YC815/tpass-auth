@@ -41,3 +41,13 @@ export async function requireAuthAdmin(): Promise<AdminActor> {
   if (actor.perm.role !== "admin") throw new ForbiddenError("需要管理員權限");
   return actor;
 }
+
+// 頁面層用：只問「這個瀏覽者是不是 admin」，不 throw。
+// layout 已經擋掉未登入與非版主，這裡只負責再分出 admin／moderator 的差別，
+// 決定要不要渲染只有管理員能用的入口——把版主看得到卻按不動的按鈕藏起來。
+export async function viewerIsAuthAdmin(): Promise<boolean> {
+  const session = await getSession();
+  if (!session) return false;
+  const perm = await getAuthPerm(session);
+  return perm.role === "admin";
+}

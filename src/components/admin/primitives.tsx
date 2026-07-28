@@ -2,6 +2,7 @@
 // 嚴格照 tpass-portal/docs/design.md：互動元素一律 border-2 border-foreground + hard offset
 // shadow，hover 上移、shadow 變大。禁 soft shadow / dark mode / hex；圓角 ≤ rounded-2xl。
 import * as React from "react";
+import Link from "next/link";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -33,12 +34,34 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: ButtonSize;
 }
 
+function buttonClass(variant: ButtonVariant, size: ButtonSize, className?: string): string {
+  return cn(BTN_BASE, BTN_VARIANT[variant], BTN_SIZE[size], className);
+}
+
 export function Button({ variant = "default", size = "md", className, ...props }: ButtonProps) {
+  return <button className={buttonClass(variant, size, className)} {...props} />;
+}
+
+// 「長得像按鈕的連結」。存在的理由：<Link><Button/></Link> 會產出 <a><button></button></a>，
+// 巢狀互動元素是無效 HTML，鍵盤與螢幕閱讀器的行為沒有定義。導覽用連結、動作用按鈕，
+// 兩者共用同一組 class 就好。
+export function LinkButton({
+  href,
+  variant = "default",
+  size = "md",
+  className,
+  children,
+}: {
+  href: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <button
-      className={cn(BTN_BASE, BTN_VARIANT[variant], BTN_SIZE[size], className)}
-      {...props}
-    />
+    <Link href={href} className={buttonClass(variant, size, className)}>
+      {children}
+    </Link>
   );
 }
 
@@ -51,6 +74,14 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
     return <input ref={ref} className={cn(FIELD_BASE, className)} {...props} />;
   },
 );
+
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function Textarea({ className, ...props }, ref) {
+  // 貼 email 清單用，所以固定 mono——一眼看得出哪一行少了 @ 或多了空格。
+  return <textarea ref={ref} className={cn(FIELD_BASE, "font-mono text-sm", className)} {...props} />;
+});
 
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   function Select({ className, children, ...props }, ref) {

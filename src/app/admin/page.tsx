@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { authConfig } from "@/config/auth";
 import { countSubjects, listRecentAuditLogs, roleStats, restrictionStats } from "@/lib/permissions/repo";
+import { formatDateTime } from "@/lib/format-time";
 import { Card, Input, Button } from "@/components/admin/primitives";
 
 export default async function AdminOverviewPage() {
@@ -122,7 +123,7 @@ export default async function AdminOverviewPage() {
               {recentAudit.map((log) => (
                 <tr key={log.id} className="border-b border-foreground/10 last:border-0">
                   <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">
-                    {log.at.toLocaleString("zh-Hant-TW")}
+                    {formatDateTime(log.at)}
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs">{log.actorEmail}</td>
                   <td className="py-2 pr-4">

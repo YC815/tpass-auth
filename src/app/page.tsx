@@ -1,8 +1,11 @@
 // T-Pass 登入頁。這不是門戶，只是發證服務的登入入口。
 // auth 不是使用者的目的地：已持有通行證的人被單獨導到這裡，直接送回門戶大廳。
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { authConfig } from "@/config/auth";
+
+export const metadata: Metadata = { title: "登入 — T-Pass" };
 
 export default async function Home({
   searchParams,
@@ -28,7 +31,8 @@ export default async function Home({
         <div className="space-y-4">
           {error === "domain" && (
             <p className="rounded-md border-2 border-foreground bg-tone-rose-bg px-4 py-3 text-center text-sm font-bold text-tone-rose-text">
-              此帳號不在授權範圍，請使用學校帳號登入。
+              {/* 講出實際網域，使用者才知道該換哪個帳號——env 驅動，不寫死。 */}
+              此帳號不在授權範圍，請改用 @{authConfig.allowedEmailDomain} 的學校帳號登入。
             </p>
           )}
           {error === "oauth" && (

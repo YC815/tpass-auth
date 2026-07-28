@@ -3,7 +3,11 @@
 /* 與 tpass-portal 設計系統一致：light-only Neobrutalism、OKLCH。 */
 /* auth 的登入/錯誤頁是使用者可能看到的少數 tauth 畫面，統一在此維護 on-brand。 */
 @theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* design.md 指定的順序：Plus Jakarta Sans → Geist Sans fallback。
+     用 next/font 產生的 CSS 變數引用，而不是字面 "Plus Jakarta Sans"（其他 repo 的寫法）——
+     兩者目前都能運作，但字面名能中的前提是 next/font 剛好沒有改寫 @font-face 的家族名，
+     那是實作細節不是契約；variable 才是它文件上給的引用方式。 */
+  --font-sans: var(--font-plus-jakarta-sans), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   --color-background:          oklch(0.99 0.002 250);

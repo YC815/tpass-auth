@@ -2,8 +2,11 @@
 // 已登入但非 auth 服務 moderator/admin → 顯示 Forbidden（不渲染後台）。
 // 注意：這裡只負責「渲染什麼畫面」，不是安全的唯一防線——server action 可被直接打，
 // 每個 action 內部都要重新呼叫 requireAuthModerator/requireAuthAdmin（見 lib/admin-guard.ts）。
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+
+export const metadata: Metadata = { title: "權限管理 — T-Pass" };
 import { getAuthPerm } from "@/lib/admin-guard";
 import { authConfig } from "@/config/auth";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -31,7 +34,11 @@ export default async function AdminLayout({
   const serviceIds = [...new Set([...authConfig.serviceIds, "auth"])];
 
   return (
-    <AdminShell email={session.email} serviceIds={serviceIds}>
+    <AdminShell
+      email={session.email}
+      serviceIds={serviceIds}
+      canBulk={perm.role === "admin"}
+    >
       {children}
     </AdminShell>
   );

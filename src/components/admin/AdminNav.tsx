@@ -3,18 +3,25 @@
 // serviceIds 由 server 端（AdminShell）傳入——authConfig 是 server-only，client 元件不能直接 import。
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, ScrollText, Boxes, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, ScrollText, Boxes, type LucideIcon } from "lucide-react";
 
 type Item = { href: string; label: string; icon: LucideIcon; mono?: boolean };
+
+export interface NavProps {
+  serviceIds: string[];
+  // 批次授權改的是角色，版主不能改角色——沒有權限的人不該看到這個入口。
+  canBulk: boolean;
+}
 
 function isActive(pathname: string | null, href: string) {
   return href === "/admin" ? pathname === "/admin" : (pathname ?? "").startsWith(href);
 }
 
-function itemsFor(serviceIds: string[]): Item[] {
+function itemsFor({ serviceIds, canBulk }: NavProps): Item[] {
   return [
     { href: "/admin", label: "總覽", icon: LayoutDashboard },
     { href: "/admin/people", label: "人員", icon: Users },
+    ...(canBulk ? [{ href: "/admin/bulk", label: "批次授權", icon: UserPlus }] : []),
     ...serviceIds.map((id) => ({
       href: `/admin/services/${id}`,
       label: id,
@@ -41,23 +48,23 @@ function NavLink({ item, active }: { item: Item; active: boolean }) {
   );
 }
 
-export function AdminSidebar({ serviceIds }: { serviceIds: string[] }) {
+export function AdminSidebar(props: NavProps) {
   const pathname = usePathname();
   return (
     <nav className="hidden w-48 shrink-0 flex-col gap-2 md:flex">
-      {itemsFor(serviceIds).map((item) => (
+      {itemsFor(props).map((item) => (
         <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
       ))}
     </nav>
   );
 }
 
-export function AdminTabBar({ serviceIds }: { serviceIds: string[] }) {
+export function AdminTabBar(props: NavProps) {
   const pathname = usePathname();
   return (
     <nav className="sticky top-16 z-40 border-b-2 border-foreground/20 bg-background/90 backdrop-blur-md md:hidden">
       <div className="flex gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {itemsFor(serviceIds).map((item) => (
+        {itemsFor(props).map((item) => (
           <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
         ))}
       </div>

@@ -56,15 +56,56 @@ export function upsertSubjectOnLogin(input: {
   });
 }
 
-// 人員列表：email 搜尋（contains，小寫）＋分頁。
+// 人員列表：文字搜尋（email ∪ name）＋服務/狀態篩選＋分頁。
+//
+// status 的四個值都是「在某個服務身上」的條件：帶 serviceId 就限定該服務，不帶就是任一服務。
+// 管制類（warning/ban）只算**生效中**的——過期的管制只是 DB 欄位還沒被下次編輯覆蓋，
+// 語意上已經解除了（判斷沿用下方 restrictionStats 的同一條）。
+export type SubjectStatusFilter = "admin" | "moderator" | "warning" | "ban";
+
 export async function listSubjects(opts: {
   query?: string;
+  serviceId?: string;
+  status?: SubjectStatusFilter;
   page: number;
   pageSize: number;
 }): Promise<{ subjects: SubjectWithGrants[]; total: number }> {
-  const where: Prisma.SubjectWhereInput = opts.query
-    ? { email: { contains: opts.query.trim().toLowerCase() } }
-    : {};
+  const and: Prisma.SubjectWhereInput[] = [];
+
+  const q = opts.query?.trim();
+  if (q) {
+    and.push({
+      OR: [
+        // email 欄位一律存小寫，所以比對前先降；name 是 Google 原樣回填的，要 insensitive。
+        { email: { contains: q.toLowerCase() } },
+        { name: { contains: q, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (opts.status) {
+    const grant: Prisma.GrantWhereInput =
+      opts.status === "admin" || opts.status === "moderator"
+        ? { role: opts.status }
+        : {
+            restriction: opts.status,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          };
+    if (opts.serviceId) grant.serviceId = opts.serviceId;
+    and.push({ grants: { some: grant } });
+  } else if (opts.serviceId) {
+    // 只選了服務沒選狀態＝「這個服務裡有故事的人」，跟 listGrantsForService 同一條定義。
+    and.push({
+      grants: {
+        some: {
+          serviceId: opts.serviceId,
+          OR: [{ role: { not: "default" } }, { restriction: { not: "none" } }],
+        },
+      },
+    });
+  }
+
+  const where: Prisma.SubjectWhereInput = and.length > 0 ? { AND: and } : {};
   const [subjects, total] = await Promise.all([
     prisma.subject.findMany({
       where,
@@ -130,6 +171,84 @@ export function findGrantByServiceAndSubject(
   return prisma.grant.findUnique({
     where: { subjectId_serviceId: { subjectId, serviceId } },
   });
+}
+
+// ── 批次授權用（/admin/bulk）─────────────────────────────────────────────
+// 一次 200 人 × 6 服務，逐筆查會是 1200 次往返——批次路徑一律整批撈。
+
+export function findSubjectsByEmails(emails: string[]): Promise<Subject[]> {
+  return prisma.subject.findMany({
+    where: { email: { in: emails.map((e) => e.toLowerCase()) } },
+  });
+}
+
+// 先把缺的 Subject 補齊（已存在的靠 email unique + skipDuplicates 略過）。
+// 回傳新建筆數，只為了讓 action 能回報「新增了幾個人」。
+// 這步在 applyRoleChanges 的交易**之外**——createMany 不回傳 id，拿不到 id 就沒辦法建 Grant。
+// 交易之後失敗會留下沒有任何 Grant 的 Subject，語意上等同「不存在的人」（權限全 default），
+// 無害；下次同一批重跑會被 skipDuplicates 接住。
+export async function createSubjectsIfMissing(emails: string[]): Promise<number> {
+  const { count } = await prisma.subject.createMany({
+    data: emails.map((email) => ({ email: email.toLowerCase() })),
+    skipDuplicates: true,
+  });
+  return count;
+}
+
+export function findGrantsBySubjectIds(
+  subjectIds: string[],
+  serviceIds: string[],
+): Promise<Grant[]> {
+  return prisma.grant.findMany({
+    where: { subjectId: { in: subjectIds }, serviceId: { in: serviceIds } },
+  });
+}
+
+export interface RoleChangeOp {
+  subjectId: string;
+  serviceId: string;
+  role: string;
+  // 稽核用：這筆變更的當事人與前後值（before 沒有 Grant 時＝null）。
+  targetEmail: string;
+  before: Prisma.InputJsonValue | null;
+}
+
+// 批次套用角色變更：所有 upsert 與稽核寫入包成**一筆交易**，全成功或全不動。
+// 半套用的名單比沒套用更難收拾——不知道停在哪一筆，稽核也只寫到一半。
+//
+// ⚠️ 這裡刻意只寫 `role`，不碰 restriction / reason / expiresAt。不要為了「少一支路徑」
+// 改用上面的 upsertGrant：那支會連管制欄位一起寫，而批次路徑只知道角色，傳什麼管制值
+// 都是瞎猜——傳 "none" 就等於把被 ban 的人默默解 ban。保證來自這裡碰不到那三個欄位，
+// 不是來自呼叫端記得帶回原值。
+export function applyRoleChanges(input: {
+  ops: RoleChangeOp[];
+  actorEmail: string;
+}): Promise<unknown[]> {
+  const actorEmail = input.actorEmail.toLowerCase();
+  return prisma.$transaction([
+    ...input.ops.map((op) =>
+      prisma.grant.upsert({
+        where: { subjectId_serviceId: { subjectId: op.subjectId, serviceId: op.serviceId } },
+        create: {
+          subjectId: op.subjectId,
+          serviceId: op.serviceId,
+          role: op.role,
+          updatedBy: actorEmail,
+        },
+        update: { role: op.role, updatedBy: actorEmail },
+      }),
+    ),
+    prisma.auditLog.createMany({
+      data: input.ops.map((op) => ({
+        actorEmail,
+        targetEmail: op.targetEmail.toLowerCase(),
+        serviceId: op.serviceId,
+        action: "role.change",
+        before: op.before ?? undefined,
+        after: { role: op.role },
+      })),
+    }),
+  ]);
 }
 
 export type GrantWithSubject = Grant & { subject: Subject };

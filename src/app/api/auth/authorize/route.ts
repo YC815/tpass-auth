@@ -19,17 +19,26 @@ export async function GET(request: NextRequest) {
   const redirectUri = params.get("redirect_uri") ?? "";
   const next = params.get("next") ?? "/";
 
+  // 這三道檢查失敗時，撞到的一定是**人**（authorize 是瀏覽器頂層導航），
+  // 所以導去 on-brand 的說明頁而不是回裸文字——原本使用者只看得到白底一行英文。
+  // reason 只帶固定代號，不回吐使用者送進來的值（避免把反射內容塞進頁面）。
+  const reject = (reason: string) => {
+    const url = new URL("/service-error", authConfig.baseUrl);
+    url.searchParams.set("reason", reason);
+    return NextResponse.redirect(url);
+  };
+
   // 服務白名單：不認識的 service id 一律拒絕（env 驅動，新增服務只改 env）。
   if (!authConfig.serviceIds.includes(serviceId)) {
-    return new NextResponse("Unknown service", { status: 400 });
+    return reject("unknown-service");
   }
   // callback 位址必須在生態系根網域白名單內（同 login 的 Open Redirect 防線）。
   if (!redirectUri || !isAllowedRedirect(redirectUri)) {
-    return new NextResponse("Invalid redirect_uri", { status: 400 });
+    return reject("invalid-redirect");
   }
   // next 只能是站內路徑（消費端 callback 會拿它做最後跳轉，不能被塞外部網址）。
   if (!next.startsWith("/") || next.startsWith("//")) {
-    return new NextResponse("Invalid next", { status: 400 });
+    return reject("invalid-next");
   }
 
   const session = await getSession();

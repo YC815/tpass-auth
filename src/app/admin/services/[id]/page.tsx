@@ -1,10 +1,13 @@
 // /admin/services/[id]：服務視角——本服務的 admin/moderator 名單、目前生效中的 ban/warning 名單。
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import { authConfig } from "@/config/auth";
+import { viewerIsAuthAdmin } from "@/lib/admin-guard";
 import { listGrantsForService } from "@/lib/permissions/repo";
 import { toEntry } from "@/lib/permissions/resolve";
-import { Card, Badge } from "@/components/admin/primitives";
+import { formatDateTime } from "@/lib/format-time";
+import { Card, Badge, LinkButton } from "@/components/admin/primitives";
 
 function isValidServiceId(id: string): boolean {
   return id === "auth" || authConfig.serviceIds.includes(id);
@@ -18,7 +21,10 @@ export default async function ServicePage({
   const { id } = await params;
   if (!isValidServiceId(id)) notFound();
 
-  const grants = await listGrantsForService(id);
+  const [grants, canBulk] = await Promise.all([
+    listGrantsForService(id),
+    viewerIsAuthAdmin(),
+  ]);
 
   const admins = grants.filter((g) => g.role === "admin");
   const moderators = grants.filter((g) => g.role === "moderator");
@@ -28,9 +34,19 @@ export default async function ServicePage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-mono text-2xl font-extrabold tracking-tight">{id}</h1>
-        <p className="mt-1 font-medium text-muted-foreground">服務視角：角色與管制名單。</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-mono text-2xl font-extrabold tracking-tight">{id}</h1>
+          <p className="mt-1 font-medium text-muted-foreground">服務視角：角色與管制名單。</p>
+        </div>
+        {/* 「幫這個服務加幹部」最自然的入口就在這頁——把 serviceId 帶過去預先勾好。
+            批次改的是角色，版主不能改角色，所以按鈕只給管理員。 */}
+        {canBulk && (
+          <LinkButton href={`/admin/bulk?service=${encodeURIComponent(id)}`} variant="primary">
+            <UserPlus className="h-4 w-4" />
+            批次加人
+          </LinkButton>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -101,7 +117,7 @@ function ListCard({
               )}
               {r.expiresAt && (
                 <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  到期：{r.expiresAt.toLocaleString("zh-Hant-TW")}
+                  到期：{formatDateTime(r.expiresAt)}
                 </p>
               )}
             </li>
