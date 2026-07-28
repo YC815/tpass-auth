@@ -4,8 +4,10 @@ import { getSession } from "@/lib/session";
 import { getAuthPerm } from "@/lib/admin-guard";
 import { authConfig } from "@/config/auth";
 import { findSubjectWithGrants } from "@/lib/permissions/repo";
+import { toEntry } from "@/lib/permissions/resolve";
 import { Card, Badge } from "@/components/admin/primitives";
 import { GrantRow, ROLE_RANK } from "./GrantRow";
+import { DangerZone } from "./DangerZone";
 import type { Restriction, Role } from "@/lib/permissions/types";
 
 export default async function PersonPage({
@@ -85,6 +87,17 @@ export default async function PersonPage({
             })}
           </ul>
         </Card>
+      )}
+
+      {/* 刪除只給 admin（版主連角色都不能改，更不該能把人整筆抹掉）。 */}
+      {!isSuperadmin && subject && canChangeRole && (
+        <DangerZone
+          email={email}
+          grantCount={subject.grants.length}
+          activeRestrictionCount={
+            subject.grants.filter((g) => toEntry(g).restriction !== undefined).length
+          }
+        />
       )}
     </div>
   );

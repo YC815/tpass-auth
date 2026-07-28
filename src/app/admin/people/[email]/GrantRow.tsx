@@ -94,6 +94,14 @@ export function GrantRow({
           {!canChangeRole && <RoleBadge role={role} />}
         </div>
 
+        {/* auth 不是一般消費端服務，是這個後台自己——不寫清楚沒人看得出差別。 */}
+        {serviceId === "auth" && (
+          <p className="text-xs font-medium text-muted-foreground">
+            這一列＝本管理面板本身。設為<strong>管理員</strong>＝可進本面板改所有人的角色與管制
+            （含把別人也設成管理員）；<strong>版主</strong>＝可進本面板但只能改管制、不能改角色。
+          </p>
+        )}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <Label>角色</Label>

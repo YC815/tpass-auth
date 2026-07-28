@@ -35,6 +35,11 @@ export function createSubject(email: string): Promise<Subject> {
   return prisma.subject.create({ data: { email: email.toLowerCase() } });
 }
 
+// 刪除 Subject：底下的 Grant 靠 schema 的 onDelete: Cascade 一起消失，不必手動先刪。
+export function deleteSubjectById(id: string): Promise<Subject> {
+  return prisma.subject.delete({ where: { id } });
+}
+
 // 登入成功時呼叫（callback/google/route.ts）：回填 sub/name、更新 lastSeenAt。
 // email 是查找鍵——panel 可能已經先用 email 建過 Subject（人還沒登入過），
 // 這裡用 upsert 讓「先建後登入」與「先登入後被管理」兩條路徑收斂成同一筆 row。
