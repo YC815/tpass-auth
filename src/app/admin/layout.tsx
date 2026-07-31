@@ -29,8 +29,8 @@ export default async function AdminLayout({
     return <Forbidden />;
   }
 
-  // "auth" 本身不在 AUTH_SERVICE_IDS 白名單裡（那是消費端 id 清單），但它也是一個
-  // 有 Grant 的服務——沿用 resolve.ts 的 serviceIds ∪ {"auth"} 慣例。
+  // "auth" 本身不在 serviceIds 裡（registry 把 issuer 排掉了，那是消費端 id 清單），
+  // 但它也是一個有 Grant 的服務——沿用 resolve.ts 的 serviceIds ∪ {"auth"} 慣例。
   const serviceIds = [...new Set([...authConfig.serviceIds, "auth"])];
 
   return (
