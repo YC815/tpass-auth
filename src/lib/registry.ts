@@ -42,7 +42,7 @@ function load(): Registry {
     throw new Error(
       `[lib/registry] 讀不到服務註冊表：${file}\n` +
         `  註冊表是並排的 public repo，在 tpass-auth 的上一層 clone 一次：\n` +
-        `    git clone https://github.com/YC815/tpass-registry.git\n` +
+        `    git clone https://github.com/tschoolsu/tpass-registry.git\n` +
         `  或用 TPASS_REGISTRY_PATH 指到 services.json 的實際位置。\n` +
         `  原始錯誤：${(e as Error).message}`,
     );

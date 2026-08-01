@@ -58,7 +58,7 @@
 
 | 項目 | 值 |
 | --- | --- |
-| **你的服務 id** | 對 `YC815/tpass-registry`（public）開 PR 登記進 `services.json`，例 `form`。auth 的發證白名單由它派生，不需另外設 env |
+| **你的服務 id** | 對 `tschoolsu/tpass-registry`（public）開 PR 登記進 `services.json`，例 `form`。auth 的發證白名單由它派生，不需另外設 env |
 | **授權入口** | `GET https://auth.lvh.me:3000/api/auth/authorize?service=<id>&redirect_uri=<你的 callback 完整網址>&next=<站內路徑>` |
 | **token 交付方式** | auth 以自動送出的 `<form method="post">` 把 `token` + `next` POST 到你的 callback（token 不進 URL / Referer / 歷史） |
 | **你要提供的 callback** | `POST <你的服務>/api/auth/callback`（收 `token`+`next`，驗章後寫自己的 cookie，303 到 `next`） |
@@ -275,7 +275,7 @@ https://auth.lvh.me:3000/api/auth/authorize
 ```
 
 **authorize 可能的錯誤**（都是你串接時要修的設定問題，不是使用者錯）：
-- `/service-error?reason=unknown-service` — `service` 不在服務註冊表裡，先到 `YC815/tpass-registry` 開 PR 登記。
+- `/service-error?reason=unknown-service` — `service` 不在服務註冊表裡，先到 `tschoolsu/tpass-registry` 開 PR 登記。
 - `400 Invalid redirect_uri` — callback 網址不是完整網址、或 hostname 不在 `*.lvh.me`（防 Open Redirect）。
 - `400 Invalid next` — `next` 必須是站內路徑（`/` 開頭且非 `//` 開頭）。
 
@@ -476,7 +476,7 @@ callback（POST，form-encoded token+next）：
 **前置確認：**
 1. 服務**有沒有後端**？純前端 SPA → 停下來告訴使用者要先加薄後端（§6）。
 2. 服務網域在 `*.lvh.me`（本機）/ 正式根網域底下、走 HTTPS？
-3. 服務 id 已登記進 `YC815/tpass-registry` 的 `services.json`？沒有→先開 PR 登記。
+3. 服務 id 已登記進 `tschoolsu/tpass-registry` 的 `services.json`？沒有→先開 PR 登記。
 
 **實作步驟：**
 1. `pnpm add jose`（或該語言 JOSE 函式庫）。
