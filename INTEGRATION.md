@@ -214,6 +214,41 @@ Cache-Control: public, max-age=3600
 - 這裡**只有公鑰**（`x`），沒有私鑰（`d`）。這是刻意的。
 - 可以快取（`max-age=3600`）；`createRemoteJWKSet` 會自動快取 + 遇到未知 `kid` 時重抓（含冷卻）。
 
+> [!IMPORTANT]
+> **輪替期間 `keys` 會有兩把**（新舊各一），這是正常狀態。
+>
+> 消費端只要照上面用 `createRemoteJWKSet` 就完全不受影響。但**如果你自作聰明「抓第一把來用」，
+> 輪替一開始就會驗不過**——因為舊 token 的 `kid` 指向第二把。
+>
+> 實測（2026-08-01）：輪替期間若 token **沒有 `kid`**，`createRemoteJWKSet` 會回
+> `ERR_JWKS_MULTIPLE_MATCHING_KEYS`。auth 簽的票一律帶 `kid`，所以正常流程不會遇到；
+> 但這也是「不要自己手刻選鑰邏輯」的第二個理由。
+
+### 4.1 發證端金鑰輪替 runbook（維運用，消費端不需要做任何事）
+
+auth 端由三個選填 env 控制，**平時全部留空 = 與輪替前行為完全一致**：
+
+| env | 用途 |
+| --- | --- |
+| `JWT_KID` | 目前簽章用的 `kid`。留空預設 `tpass-key-1` |
+| `JWT_PREV_PUBLIC_KEY` | 上一把**公鑰**（PEM）。輪替 overlap 期間才填 |
+| `JWT_PREV_KID` | 上一把的 `kid`。**必須與 `JWT_KID` 不同**，撞名會在啟動時直接報錯 |
+
+後兩者**要同時填**才會生效。輪替步驟：
+
+1. 產一組新金鑰對。
+2. auth 設定：`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` 換成新的、`JWT_KID` 給一個新名字（例 `tpass-key-2`）；
+   同時把**舊公鑰**填進 `JWT_PREV_PUBLIC_KEY`、舊 kid 填進 `JWT_PREV_KID`。重新部署 auth。
+   → 此時 JWKS 公開兩把；新票用新鑰簽，舊票仍驗得過。
+3. **等待至少 `JWT_TTL_SECONDS`**（建議直接等 `AUTH_SESSION_TTL_SECONDS`，預設 12 小時），
+   讓所有舊鑰簽出的 token 自然過期。
+4. 清空 `JWT_PREV_PUBLIC_KEY` 與 `JWT_PREV_KID`，重新部署 auth。舊鑰正式下架。
+
+> [!CAUTION]
+> **第 3 步不能省。** auth 驗章嚴格依 `kid` 選鑰、認不得就失敗，**沒有「每把都試一遍」的
+> fallback**——那種 fallback 會讓舊鑰下架後仍然驗得過，輪替永遠收不了尾。
+> 所以 overlap 期間縮太短，等於讓還沒過期的舊票直接失效（使用者被登出）。
+
 ---
 
 ## 5. 驗章規則（安全關鍵，逐條必做）
