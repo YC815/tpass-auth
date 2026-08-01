@@ -58,7 +58,7 @@
 
 | 項目 | 值 |
 | --- | --- |
-| **你的服務 id** | 向 auth 管理者登記（＝ tpass-ops `services.json` 的 id，例 `form`）；auth 端進 `AUTH_SERVICE_IDS` 白名單 |
+| **你的服務 id** | 對 `YC815/tpass-registry`（public）開 PR 登記進 `services.json`，例 `form`。auth 的發證白名單由它派生，不需另外設 env |
 | **授權入口** | `GET https://auth.lvh.me:3000/api/auth/authorize?service=<id>&redirect_uri=<你的 callback 完整網址>&next=<站內路徑>` |
 | **token 交付方式** | auth 以自動送出的 `<form method="post">` 把 `token` + `next` POST 到你的 callback（token 不進 URL / Referer / 歷史） |
 | **你要提供的 callback** | `POST <你的服務>/api/auth/callback`（收 `token`+`next`，驗章後寫自己的 cookie，303 到 `next`） |
@@ -275,7 +275,7 @@ https://auth.lvh.me:3000/api/auth/authorize
 ```
 
 **authorize 可能的錯誤**（都是你串接時要修的設定問題，不是使用者錯）：
-- `400 Unknown service` — `service` 不在 auth 的 `AUTH_SERVICE_IDS` 白名單，先找 auth 管理者登記。
+- `/service-error?reason=unknown-service` — `service` 不在服務註冊表裡，先到 `YC815/tpass-registry` 開 PR 登記。
 - `400 Invalid redirect_uri` — callback 網址不是完整網址、或 hostname 不在 `*.lvh.me`（防 Open Redirect）。
 - `400 Invalid next` — `next` 必須是站內路徑（`/` 開頭且非 `//` 開頭）。
 
@@ -460,7 +460,7 @@ callback（POST，form-encoded token+next）：
 | 症狀 | 可能原因 / 解法 |
 | --- | --- |
 | 後端 fetch JWKS 報 TLS 錯 | 沒設 `NODE_EXTRA_CA_CERTS`（§9.2），或用 `tpass dev` 啟動 |
-| authorize 回 `400 Unknown service` | 服務 id 沒進 auth 的 `AUTH_SERVICE_IDS`，找管理者登記後重啟 auth |
+| 被導去 `/service-error?reason=unknown-service` | 服務 id 不在 `tpass-registry` 的 `services.json`，登記並 merge 後重新部署 auth |
 | authorize 回 `400 Invalid redirect_uri` | callback 不是完整網址、或 hostname 不在根網域白名單 |
 | callback 收到 token 但驗不過 | aud 對不上——你驗的是 `tpass:<id>`？id 與 authorize 的 `service` 一致？ |
 | 登入後又立刻被導回登入 | ①cookie 沒寫成功（Secure 但你走 http？）②每請求驗章用錯 aud ③cookie 名不一致 |
@@ -476,7 +476,7 @@ callback（POST，form-encoded token+next）：
 **前置確認：**
 1. 服務**有沒有後端**？純前端 SPA → 停下來告訴使用者要先加薄後端（§6）。
 2. 服務網域在 `*.lvh.me`（本機）/ 正式根網域底下、走 HTTPS？
-3. 服務 id 已登記進 auth 的 `AUTH_SERVICE_IDS` 與 tpass-ops `services.json`？沒有→先登記。
+3. 服務 id 已登記進 `YC815/tpass-registry` 的 `services.json`？沒有→先開 PR 登記。
 
 **實作步驟：**
 1. `pnpm add jose`（或該語言 JOSE 函式庫）。

@@ -1,15 +1,16 @@
 // 設定中心：所有可變設定一律從這裡讀（process.env）。
 // 換驗證對象 / 上線開跨子網域 = 只改環境變數，其他檔案只 import 這個物件。
 import "server-only";
+import { consumerServiceIds } from "@/lib/registry";
 
 // 必填 env：缺任何一個就在啟動時明確報出，不默默用 undefined 跑下去。
+// 服務白名單刻意不在這裡——它來自 tpass-registry（見下方 serviceIds）。
 const REQUIRED = [
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "AUTH_BASE_URL",
   "AUTH_ALLOWED_HOST_SUFFIX",
   "AUTH_ALLOWED_EMAIL_DOMAIN",
-  "AUTH_SERVICE_IDS",
   "PORTAL_URL",
   "JWT_PRIVATE_KEY",
   "JWT_PUBLIC_KEY",
@@ -48,9 +49,11 @@ export const authConfig = {
   // v2：auth 自己的登入態，host-only（不設 Domain）——只有 auth 網域收得到，
   // 縮小外洩半徑：任何子網域被攻破都拿不到這顆 cookie。
   sessionCookieName: "tpass_auth_session",
-  // v2：可申請 per-service token 的服務 id 白名單（逗號分隔，例 portal,form,msg,appeals）。
+  // v2：可申請 per-service token 的服務 id 白名單，來自 tpass-registry（唯一真相）。
   // 每個服務拿到的 token aud=tpass:<id>，只在該服務有效——單一服務被攻破不再等於全生態淪陷。
-  serviceIds: process.env.AUTH_SERVICE_IDS!.split(",").map((s) => s.trim()).filter(Boolean),
+  // ⚠️ 刻意不吃 env override：主機上那把手寫的舊清單會靜默蓋掉 registry，
+  //    正是這次要消滅的「登記了卻沒生效」那類 bug。要改白名單就改 registry。
+  serviceIds: consumerServiceIds,
   // 逃生門：生態總管，恆為所有服務 admin、不進 DB、DB 掛掉照樣有效。
   // 逗號分隔 email；一律小寫正規化（跟 Subject.email 查找鍵一致）。
   superadmins: process.env.AUTH_SUPERADMINS!

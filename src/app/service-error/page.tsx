@@ -15,7 +15,7 @@ const REASONS: Record<string, { title: string; message: string; hint: string }> 
   "unknown-service": {
     title: "這個服務還沒登記",
     message: "T-Pass 不認得這個服務代號，因此不會為它發出通行證。",
-    hint: "串接者：把服務 id 加進 auth 的 AUTH_SERVICE_IDS，並確認 services.json 也登記了。",
+    hint: "串接者：把服務登記進 tpass-registry 的 services.json（開 PR），merge 後重新部署 auth 即生效。",
   },
   "invalid-redirect": {
     title: "服務的回呼位址不被信任",
