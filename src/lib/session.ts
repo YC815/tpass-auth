@@ -40,20 +40,31 @@ export interface GoogleProfile {
 // PEM → CryptoKey 是 async，不能在 module top-level 同步做。
 // 用 module 級 cached promise 各載入一次。
 let privateKeyPromise: Promise<CryptoKey> | null = null;
-let publicKeyPromise: Promise<CryptoKey> | null = null;
+let publicKeysPromise: Promise<Map<string, CryptoKey>> | null = null;
 
 function getPrivateKey(): Promise<CryptoKey> {
   privateKeyPromise ??= importPKCS8(authConfig.jwt.privateKeyPem, "EdDSA");
   return privateKeyPromise;
 }
 
-function getPublicKey(): Promise<CryptoKey> {
-  publicKeyPromise ??= importSPKI(authConfig.jwt.publicKeyPem, "EdDSA");
-  return publicKeyPromise;
+// 依 kid 索引的公鑰表：平常只有一把（目前簽章用的），
+// 輪替期間會多一把舊鑰，讓舊鑰簽出、尚未過期的 token 在整段 TTL 內仍驗得過。
+async function loadPublicKeys(): Promise<Map<string, CryptoKey>> {
+  const entries = await Promise.all(
+    authConfig.jwt.publicKeys.map(
+      async ({ kid, pem }) => [kid, await importSPKI(pem, "EdDSA")] as const,
+    ),
+  );
+  return new Map(entries);
 }
 
-// 公鑰也給 JWKS route 用。
-export { getPublicKey };
+function getPublicKeys(): Promise<Map<string, CryptoKey>> {
+  publicKeysPromise ??= loadPublicKeys();
+  return publicKeysPromise;
+}
+
+// 公鑰表也給 JWKS route 用。
+export { getPublicKeys };
 
 // audience 命名慣例（契約 v2）：每個服務一個 aud=tpass:<serviceId>，token 只在該服務有效。
 export const serviceAudience = (serviceId: string) => `tpass:${serviceId}`;
@@ -77,7 +88,7 @@ async function sign(
     name: claims.name,
     permissions: claims.permissions,
   })
-    .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.kid })
+    .setProtectedHeader({ alg: "EdDSA", kid: authConfig.jwt.signingKid })
     .setSubject(claims.sub)
     .setIssuer(authConfig.jwt.issuer)
     .setAudience(audience)
@@ -120,17 +131,28 @@ export async function signServiceToken(
 // 用公鑰驗章。安全關鍵：必鎖 algorithms 防 alg confusion（公鑰被當對稱密鑰偽造 token）。
 // 失敗一律回 null，不把 error throw 給呼叫端。
 // audience 必填：驗哪一張票由呼叫端明講，不給預設值——預設值只會讓人忘記傳而驗錯對象。
+//
+// 選鑰嚴格依 header 的 kid：認不得的 kid 直接失敗，不做「試過每一把」的 fallback。
+// 那種 fallback 會讓「舊鑰已下架」變成驗得過，輪替就永遠收不了尾。
 export async function verifySession(
   token: string,
   audience: string,
 ): Promise<TPassClaims | null> {
   try {
-    const publicKey = await getPublicKey();
-    const { payload } = await jwtVerify(token, publicKey, {
-      algorithms: ["EdDSA"],
-      issuer: authConfig.jwt.issuer,
-      audience,
-    });
+    const keys = await getPublicKeys();
+    const { payload } = await jwtVerify(
+      token,
+      async (header) => {
+        const key = header.kid ? keys.get(header.kid) : undefined;
+        if (!key) throw new Error(`unknown kid: ${header.kid ?? "(缺 kid)"}`);
+        return key;
+      },
+      {
+        algorithms: ["EdDSA"],
+        issuer: authConfig.jwt.issuer,
+        audience,
+      },
+    );
     return {
       sub: payload.sub as string,
       email: payload.email as string,

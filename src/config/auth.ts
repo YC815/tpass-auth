@@ -27,8 +27,29 @@ if (missing.length > 0) {
   );
 }
 
-// 簽章金鑰只有一把，固定 kid；未來輪替金鑰時子網域才認得出是哪一把。
-const KID = "tpass-key-1";
+// 簽章用的 kid。未設 env 時沿用舊值——既有部署不改任何東西，行為完全不變。
+const signingKid = process.env.JWT_KID || "tpass-key-1";
+
+// JWKS 要公開的公鑰清單。平常只有一把（目前簽章用的那把）；輪替期間
+// （JWT_PREV_PUBLIC_KEY 與 JWT_PREV_KID 都設了）再加上舊鑰供驗章 overlap，
+// 讓「舊鑰簽出、尚未過期」的 token 在整段 TTL 內仍驗得過。兩者皆未設 = 與輪替前一致。
+//
+// 為什麼 kid 一定要跟著走：消費端用 jose 的 createRemoteJWKSet，是**依 header 的 kid**
+// 從 JWKS 選鑰的。兩把公鑰共用同一個 kid 會讓消費端選錯鑰而驗不過。
+const publicKeys: { kid: string; pem: string }[] = [
+  { kid: signingKid, pem: process.env.JWT_PUBLIC_KEY! },
+];
+if (process.env.JWT_PREV_PUBLIC_KEY && process.env.JWT_PREV_KID) {
+  if (process.env.JWT_PREV_KID === signingKid) {
+    throw new Error(
+      "[config/auth] JWT_PREV_KID 不可與 JWT_KID 相同——消費端依 kid 選鑰，撞名會選錯把。",
+    );
+  }
+  publicKeys.push({
+    kid: process.env.JWT_PREV_KID,
+    pem: process.env.JWT_PREV_PUBLIC_KEY,
+  });
+}
 
 // auth 登入態 TTL 預設 12h：選填 env，沒設就用這個（不像 per-service TTL 那樣逼你想清楚）。
 const DEFAULT_SESSION_TTL_SECONDS = 43200;
@@ -78,7 +99,9 @@ export const authConfig = {
   portalUrl: process.env.PORTAL_URL!,
   jwt: {
     privateKeyPem: process.env.JWT_PRIVATE_KEY!,
-    publicKeyPem: process.env.JWT_PUBLIC_KEY!,
+    // 目前簽章用的 kid，與 JWKS 公開的公鑰清單（輪替期間會有兩把）。
+    signingKid,
+    publicKeys,
     issuer: process.env.JWT_ISSUER!,
     ttlSeconds: Number(process.env.JWT_TTL_SECONDS!),
     // auth 自己登入態的 TTL（長，選填）：這是「還算登入」的期間，跟 per-service
@@ -86,7 +109,6 @@ export const authConfig = {
     sessionTtlSeconds: Number(
       process.env.AUTH_SESSION_TTL_SECONDS ?? DEFAULT_SESSION_TTL_SECONDS,
     ),
-    kid: KID,
   },
 } as const;
 
